@@ -88,8 +88,33 @@ dev-services.sh up is idempotent. If interrupted, rerun the last milestone's
 validation to locate state.
 
 ## 12. Progress
-- [x] M1 workspace  - [x] M2 pod pkg  - [x] M3 scripts+services  - [ ] M4 CI+verify
+- [x] M1 workspace  - [x] M2 pod pkg  - [x] M3 scripts+services  - [x] M4 CI+verify
 
 ## 13. Surprises & Discoveries
+- Pack ships WITHOUT a .gitignore (it is in EP-001 §6 Files to Change). The
+  M2 commit swept in `pod/.venv` (2,734 files) before .gitignore existed;
+  fixed immediately with a hygiene commit untracking the venv. Lesson: create
+  .gitignore in M1, before the first install.
+- Shipped test-integration.sh fails on the empty tree: `cargo test --workspace
+  --test '*'` errors when no crate has a tests/ dir, and `pytest -m
+  integration` exits 5 when no test is integration-marked. Both branches now
+  SKIP behind marker checks (same convention as smoke/e2e), restoring the
+  pre-EP-003 green baseline.
+- pip-audit flagged pytest 8.3.5 (PYSEC-2026-1845); lockfile pinned to 9.0.3.
+
 ## 14. Decision Log
+- Rust toolchain pinned to 1.96.0 (active stable on dev box; satisfies the
+  1.79+ requirement in ENVIRONMENT.md).
+- Python on the dev box is 3.12.3 (no python3.11); preflight accepts >= 3.11
+  so install.sh falls back to python3. pyproject targets py311 for CI parity.
+- vihs-core is an empty lib in M1; chain/hash logic lands in EP-002.
+- client/index.html and deploy/runpod/README.md are placeholder stubs that
+  satisfy the ARCHITECTURE §2 layout contract from EP-001; both marked as
+  replaced by later plans.
+
 ## 15. Outcomes & Retrospective
+All four milestones green on the first full pass after two script fixes.
+verify.sh VERIFY OK on the skeleton; both healthz endpoints live-verified
+(memoryd :8091, orchestrator :8080 return "ok"); layout matches ARCHITECTURE
+§2. Remaining risks: none material at skeleton stage; integration/e2e/smoke
+gates are marker-SKIPs until their owning plans land.

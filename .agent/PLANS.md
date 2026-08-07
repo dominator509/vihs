@@ -5,17 +5,16 @@ system change. A new agent with no prior conversation must be able to
 continue from the ExecPlan alone.
 
 ## Active plan
-Exactly one ExecPlan is ACTIVE at a time. Current: **EP-001 (ACTIVE)** —
-EP-000 is SKIPPED for this greenfield repo per its own gate (see EP-000).
-Update this line when a plan completes; the next plan in ROADMAP order
-becomes ACTIVE unless the user says otherwise.
+Exactly one ExecPlan is ACTIVE at a time. Current: **EP-002 (ACTIVE)** —
+EP-001 is DONE. Update this line when a plan completes; the next plan in
+ROADMAP order becomes ACTIVE unless the user says otherwise.
 
 Status legend: PENDING → ACTIVE → DONE (or SKIPPED with recorded reason).
 | EP | Status | | EP | Status |
 |---|---|---|---|---|
 | 000 | SKIPPED (greenfield) | | 006 | PENDING |
-| 001 | ACTIVE | | 007 | PENDING |
-| 002 | PENDING | | 008 | PENDING |
+| 001 | DONE | | 007 | PENDING |
+| 002 | ACTIVE | | 008 | PENDING |
 | 003 | PENDING | | 009 | PENDING |
 | 004 | PENDING | | 010 | PENDING |
 | 005 | PENDING | | | |

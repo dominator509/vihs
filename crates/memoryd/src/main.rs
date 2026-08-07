@@ -11,7 +11,9 @@ const DEFAULT_ADDR: &str = "127.0.0.1:8091";
 async fn main() {
     let addr = std::env::var("VIHS_MEMORYD_ADDR").unwrap_or_else(|_| DEFAULT_ADDR.to_string());
     let app = Router::new().route("/healthz", get(|| async { "ok" }));
-    let listener = tokio::net::TcpListener::bind(&addr).await.expect("bind memoryd");
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .expect("bind memoryd");
     println!("memoryd listening on {addr}");
     axum::serve(listener, app).await.expect("serve memoryd");
 }

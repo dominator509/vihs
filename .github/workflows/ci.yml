@@ -1,0 +1,35 @@
+name: verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (pinned)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.96.0
+          components: rustfmt, clippy
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: sh scripts/install.sh
+
+      - name: Start dev services
+        run: sh scripts/dev-services.sh up
+
+      - name: Full verification
+        run: sh scripts/verify.sh
+
+      - name: Production readiness (automated subset)
+        run: sh scripts/production-readiness-check.sh
