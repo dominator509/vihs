@@ -25,6 +25,9 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_MEMORYD_ADDR | yes | all | 127.0.0.1:8091 | N | memoryd bind/target | host:port |
 | VIHS_ORCH_ADDR | yes | all | 0.0.0.0:8080 | N | orchestrator bind | host:port |
 | VIHS_ADMIN_ADDR | yes | all | 127.0.0.1:8081 | N | admin listener | host:port, non-public |
+| VIHS_MCP_ADDR | yes | all | 127.0.0.1:8092 | N | MCP server bind (ADR-011) | host:port |
+| VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat OR AXIOM gateway base (ADR-012) | reachable in real mode |
+| VIHS_LLM_TOKEN | pod | stage,prod | (bearer for AXIOM gateway) | S | brain-stage auth token | non-empty when PROVIDER=axiom-gateway |
 | VIHS_TOKEN_PEPPER | yes | stage,prod | (random 32B b64) | S | token hash pepper | ≥32 bytes decoded |
 | POD_MAX_SESSIONS | yes | all | 2 | N | derived concurrency cap | int ≥1 (ADR-010) |
 | SCALE_UP_FILL | no | all | 0.8 | N | preemptive scale threshold (4/5) | 0<x<1 |

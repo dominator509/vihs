@@ -53,6 +53,30 @@ token is live (≤15 min).
 | GET /admin/scale | autoscaler state: fill, queue depth, warm floor, last decisions |
 | POST /admin/tokens | mint user/admin tokens `{owner_id, scope}` → `{token}` (shown once) |
 
+## MCP server (ADR-011) — same ops, MCP transport
+The MCP server (`mcpd`, listens on `VIHS_MCP_ADDR`) is a thin adapter over the
+orchestrator operations above: one implementation, two transports. It speaks
+JSON-RPC 2.0 (MCP 2025-03-26): `initialize`, `tools/list`, `tools/call`.
+Every tool below has an EXACT HTTP twin in the registries above; schema
+mirrors the route body; auth uses the same bearer tokens. Tool names are
+`vihs_*` prefixed so multi-server MCP hosts (AXIOM) keep namespaces disjoint.
+
+| Tool | Arguments → Result | Twin route |
+|---|---|---|
+| vihs_session_create | `{persona_id}` → `{session_id, created_at}` | POST /v1/sessions |
+| vihs_session_resume | `{session_id}` → `{ws_url, connection_id, last_turn_id}` | POST /v1/sessions/{id}/resume |
+| vihs_session_list | `{}` → `{sessions: [{session_id, updated_at, turns}]}` | GET /v1/sessions |
+| vihs_session_transcript | `{session_id}` → `{transcript_md}` | GET /v1/sessions/{id}/transcript |
+| vihs_session_delete | `{session_id}` → `{deleted: true}` | DELETE /v1/sessions/{id} |
+| vihs_pods_list | `{}` → `{pods: [{id, addr, state, fill, cap, last_ping_age_s}]}` | GET /admin/pods |
+| vihs_pod_drain | `{pod_id}` → `{draining: true}` | POST /admin/pods/{id}/drain |
+| vihs_scale_status | `{}` → `{fill, queue_depth, warm_floor, last_decisions}` | GET /admin/scale |
+| vihs_token_mint | `{owner_id, scope}` → `{token}` (shown once) | POST /admin/tokens |
+
+Contract tests: for each tool, a JSON-RPC `tools/call` fixture asserting the
+same schema the route contract test asserts (added in EP-004, same milestone
+as the route). Errors map to MCP `isError: true` with SPEC-006 codes.
+
 ## Orchestrator internal API for pods (pod tokens)
 | Route | Purpose |
 |---|---|

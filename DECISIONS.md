@@ -18,6 +18,8 @@ ExecPlan Decision Log instead. Status ∈ {proposed, accepted, superseded}.
 | 008 | Encryption at rest via store SSE, not app-layer envelope | accepted | 2026-07-17 | djw |
 | 009 | Monolithic pod first; disaggregate on utilization trigger | accepted | 2026-07-17 | djw |
 | 010 | Cap default 2/pod until load-test derives real figure | accepted | 2026-07-17 | djw |
+| 011 | Control surface = HTTP API + MCP server (same ops) | accepted | 2026-07-18 | djw |
+| 012 | AXIOM LLM gateway as stage/prod brain seam | accepted | 2026-07-18 | djw |
 
 ## ADR-001 Rust control plane, Python pod agent
 Context: durability invariants (INV-2/3/4/5) live in the control plane; the
@@ -84,3 +86,42 @@ service. Identity/memory model unchanged either way.
 ## ADR-010 Cap default 2
 Decision: `POD_MAX_SESSIONS=2` until `loadtest-capacity.sh` derives the real
 figure per model set; router enforces hard. Re-derive on any model change.
+
+## ADR-011 Control surface = HTTP API + MCP server (same ops)
+Context: VIHS must be fully controllable programmatically — by AXIOM's agents
+and by external tooling — through MCP and/or HTTP APIs. The WebRTC client is
+one consumer, not the only one.
+Decision: every control-plane operation (session create/resume/list/export/
+delete, pod registry, drain, scale state, token minting) is exposed BOTH as
+an HTTP route (SPEC-003 registries) AND as an MCP tool (new SPEC-003 §MCP).
+The MCP server is a thin adapter over the same orchestrator operations —
+single implementation, two transports. Tool schema mirrors route bodies;
+auth uses the same admin/user bearer tokens. No second behavior surface.
+Alternatives: MCP-only (breaks plain-API integrators); API-only (AXIOM's
+agents and other MCP clients cannot drive VIHS without custom glue).
+Consequences: EP-004 must ship the MCP server alongside the API layer;
+SPEC-003 gains an MCP tool registry with contract tests mirroring the route
+contract tests; tool names are `vihs_*` prefixed to avoid collisions in
+multi-server MCP hosts (AXIOM's mcp-server uses `analytics_query`-style
+names, so the `vihs_` prefix keeps namespaces disjoint).
+
+## ADR-012 AXIOM LLM gateway as stage/prod brain seam
+Context: the operator runs AXIOM (a multi-provider LLM gateway with
+`POST /api/v1/llm/chat` and SSE `POST /api/v1/llm/chat/stream`, policy-based
+routing, and per-model egress isolation). VIHS's brain stage needs streaming
+LLM with latency budget control — duplicating provider/key management inside
+VIHS would split the operator's cost/isolation controls.
+Decision: the pod's LLM stage implements a stage Protocol whose default
+stage/prod provider is the AXIOM LLM gateway. `VIHS_LLM_URL` may point at
+`http://…/api/v1/llm`; the stage maps VIHS context assembly to
+`{messages, model, policy, stream: true, egress: true}` and consumes the SSE
+`data: {"content": …}` chunks. Mocks remain the dev/CI provider; `PROVIDER`
+values gain `axiom-gateway` alongside `mock`. Local vLLM stays a supported
+swap (same Protocol).
+Alternatives: talk to vLLM directly from pods (bypasses gateway policy,
+cache, egress isolation); embed provider keys in pods (worse security
+posture).
+Consequences: pod needs `VIHS_LLM_URL` + `VIHS_LLM_TOKEN` (S) + provider
+config; ENVIRONMENT.md rows updated; SPEC-001 D5 context assembly already
+matches the gateway's messages shape; egress isolation for the brain stage
+comes from the gateway, not from pod-side networking.

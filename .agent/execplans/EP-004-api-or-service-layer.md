@@ -10,7 +10,9 @@ every behavior is CI-testable without a GPU or cloud account.
 `crates/orchestrator`: public API rows (SPEC-003), admin API, internal pod
 API + assignment WS, signaling relay, router, autoscaler, `PodProvider`
 trait + `mock` driver, queueing, static client serving. Contract +
-simulation tests.
+simulation tests. **`crates/mcpd`: MCP server (ADR-011) exposing the same
+orchestrator ops as `vihs_*` tools (SPEC-003 §MCP), with JSON-RPC contract
+fixtures mirroring the route contract tests.**
 
 ## 3. Non-goals
 Real RunPod driver (EP-009). Real auth tokens (Authorizer trait, permissive

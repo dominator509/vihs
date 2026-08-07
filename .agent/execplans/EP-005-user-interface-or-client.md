@@ -11,9 +11,13 @@ interruption and resume runs green on a laptop with zero GPUs.
 `pod/vihs_pod/`: agent bootstrap (register, health, assignment WS, aiortc
 peer), turn FSM + AbortBus (SPEC-001 D1/D3), clause chunker (D2), context
 assembly (D5), stage Protocols + mock implementations + real-stage adapters
-(faster-whisper, vLLM client, Piper, lip-sync stub interface, GStreamer mux),
-memory_client (append/fetch), captions data channel, latency instrumentation
-hooks. `client/`: SPEC-004 flows F1–F7. E2E harness.
+(faster-whisper, vLLM client OR AXIOM gateway client per ADR-012, Piper,
+lip-sync stub interface, GStreamer mux), memory_client (append/fetch),
+captions data channel, latency instrumentation hooks. `client/`: SPEC-004
+flows F1–F7. E2E harness. The LLM stage Protocol gains an `axiom-gateway`
+provider (ADR-012): SSE streaming against `VIHS_LLM_URL`/`VIHS_LLM_TOKEN`
+with `{messages, model, policy, stream: true, egress: true}` — same
+Protocol as the vLLM client, swap-selected by `PROVIDER`.
 
 ## 3. Non-goals
 Real lip-sync model integration beyond the adapter + a frame-synthesizing

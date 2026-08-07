@@ -31,6 +31,8 @@ untouched.
                               # deterministic render, chain-fsck bin
     memoryd/                  # Session Memory Service (single writer)
     orchestrator/             # router, autoscaler, signaling, auth gateway
+    mcpd/                     # MCP server (ADR-011): thin adapter over the
+                              # same orchestrator ops; vihs_* tools
   pod/                        # Python 3.11 pod agent
     vihs_pod/
       agent.py                # entrypoint, health, signaling client
