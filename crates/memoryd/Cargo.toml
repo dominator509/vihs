@@ -7,5 +7,23 @@ edition.workspace = true
 vihs-core = { path = "../vihs-core" }
 axum = { workspace = true }
 tokio = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+aws-sdk-s3 = "1"
+aws-config = "1"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+futures = "0.3"
+async-trait = "0.1"
+dashmap = "6"
+bytes = "1"
+url = "2"
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-util = { version = "0.7", features = ["io"] }
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

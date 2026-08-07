@@ -9,7 +9,7 @@ use std::fmt;
 
 /// Durable conversation identifier. Crypto-random UUIDv4. NOT an auth token
 /// (SPEC-005): a leaked ID must never replay a transcript.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SessionId(pub String);
 

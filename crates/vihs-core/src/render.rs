@@ -11,11 +11,12 @@ use crate::event::{Event, Kind, Role};
 const INTERRUPTED_MARK: &str = "⟪interrupted⟫";
 
 /// Persona name: from the first `system` event's text (SPEC-002 memory.md
-/// shape). Falls back to "Assistant" when no system event exists.
+/// shape) — EXCLUDING summary events, which are also role=system but carry
+/// the rolling summary text, not the persona. Falls back to "Assistant".
 fn persona_name(events: &[Event]) -> &str {
     events
         .iter()
-        .find(|e| e.role == Role::System)
+        .find(|e| e.role == Role::System && e.kind != Kind::Summary)
         .map(|e| e.text.as_str())
         .unwrap_or("Assistant")
 }

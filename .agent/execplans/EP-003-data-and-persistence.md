@@ -136,8 +136,33 @@ test — if M2's failpoint test flakes, that is a real bug, not test debt
 ## 12. Progress
 - [ ] M1 store  - [ ] M2 writer+crash  - [ ] M3 load/render  - [ ] M4 rebuild
 - [ ] M5 compaction  - [ ] M6 delete/ttl  - [ ] M7 api+contract
+## 12. Progress
+- [x] M1 object store + append + dedup   - [x] M2 crash-order recovery
+- [x] M3 load/render + signed URLs        - [x] M4 rebuild-index
+- [x] M5 compaction                       - [x] M6 delete + TTL sweep
+- [x] M7 API + contract tests
 
 ## 13. Surprises & Discoveries
+- D-5 dedup keys on the CONTENT hash (body minus chain fields), not the
+  sealed hash — a retried write after a dropped reply must dedup regardless
+  of how far the tip moved (reproduced by integ_append).
+- Crash-order recovery must VERIFY the index tip against the store tail
+  (ADR-003: index is a cache, log is truth) — trusting the index blindly
+  tore the chain on restart (reproduced by integ_crash_order).
+- Summary events are role=system; persona_name must skip kind=Summary or the
+  rolling summary text becomes the speaker label (108KB memory blob).
+- aws-sdk-s3 1.141: `collect()` returns AggregatedBytes (needs .into_bytes()),
+  `is_truncated()` returns Option<bool>, presigned URLs need uri().as_str().
+- redis 0.27 needs connection-manager feature for aio::ConnectionManager;
+  get_multiplexed_async_connection is the non-deprecated test path.
+
 ## 14. Decision Log
-(s3 crate choice; seq-object batch size; summarizer mock format)
+- S3 client: aws-sdk-s3 1.141 (pinned by lockfile), presigning via
+  PresigningConfig; endpoint_url override for MinIO dev.
+- Redis client: redis 0.27 with tokio-comp + connection-manager.
+- New module rebuild.rs (lib) so rebuild-index is testable; main.rs calls it.
+- One small object per append (events/{seq:012}.jsonl) — O(1) append on S3.
+- 404 (not 403) for unknown sessions — no ID oracle (SPEC-005).
+
+## 15. Outcomes & Retrospective
 ## 15. Outcomes & Retrospective
