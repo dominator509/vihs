@@ -3,6 +3,8 @@
 
 # Python pod
 /pod/.venv
+/pod/build
+/pod/*.egg-info
 __pycache__/
 *.pyc
 

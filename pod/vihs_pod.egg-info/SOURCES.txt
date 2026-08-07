@@ -1,8 +1,0 @@
-pyproject.toml
-tests/test_smoke.py
-vihs_pod/__init__.py
-vihs_pod/agent.py
-vihs_pod.egg-info/PKG-INFO
-vihs_pod.egg-info/SOURCES.txt
-vihs_pod.egg-info/dependency_links.txt
-vihs_pod.egg-info/top_level.txt
