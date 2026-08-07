@@ -88,7 +88,7 @@ dev-services.sh up is idempotent. If interrupted, rerun the last milestone's
 validation to locate state.
 
 ## 12. Progress
-- [x] M1 workspace  - [ ] M2 pod pkg  - [ ] M3 scripts+services  - [ ] M4 CI+verify
+- [x] M1 workspace  - [x] M2 pod pkg  - [ ] M3 scripts+services  - [ ] M4 CI+verify
 
 ## 13. Surprises & Discoveries
 ## 14. Decision Log
