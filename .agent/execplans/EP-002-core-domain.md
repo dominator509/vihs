@@ -136,9 +136,39 @@ Pure code; everything re-runnable. Golden regeneration only via the explicit
 UPDATE_GOLDEN path.
 
 ## 12. Progress
-- [ ] M1 types  - [ ] M2 canonical+hash  - [ ] M3 properties
-- [ ] M4 renders+goldens  - [ ] M5 fsck bin
+- [x] M1 types  - [x] M2 canonical+hash  - [x] M3 properties
+- [x] M4 renders+goldens  - [x] M5 fsck bin
 
 ## 13. Surprises & Discoveries
+- serde_json::Error does not implement PartialEq/Eq, so ChainError cannot
+  derive PartialEq; error assertions use `matches!` instead of `assert_eq!`.
+- proptest-generated test names carry no `prop_` prefix — the plan's
+  validation filter `cargo test -p vihs-core prop_` matched nothing; ran the
+  named test targets directly. (Cosmetic; validations green either way.)
+- Arbitrary JSON strategies generate top-level non-objects; canonical_bytes
+  is defined over objects only, so stability/utf8 properties wrap the value
+  in `{"e": v}`.
+- cargo test CWD is the crate dir, not the workspace root — golden paths are
+  anchored at CARGO_MANIFEST_DIR.
+- rtk-tee wrapper crashed on `cargo test`; used full path
+  `/root/.cargo/bin/cargo` (known workaround, blueprint skill §2).
+- Binary name: file `chain_fsck.rs` yields bin `chain_fsck`; COMMANDS.md and
+  test-integration.sh reference `chain-fsck` — added explicit `[[bin]]`.
+
 ## 14. Decision Log
+- Event `meta` uses `asr_conf_bp` (integer basis points) per D-7; the
+  ARCHITECTURE §7.1 example shows `asr_conf: 0.94` illustratively but the
+  normative rule forbids floats in hashed fields.
+- Fixed-vector hash for the SPEC-002 example frozen at
+  `blake3:51ec6aa6…68f72` (computed, then recorded in the test).
+- Golden fixtures generated through the real `seal` path (writer determinism
+  acceptance: sealing raw bodies reproduces recorded hashes — proven by
+  golden_all_chains_fsck).
+- Persona name sourced from the first `system` event's text (SPEC-002 shape);
+  fallback "Assistant" when absent.
+
 ## 15. Outcomes & Retrospective
+All five milestones green: 15 unit + 5 golden + 8 property tests (256 cases
+each). chain-fsck prints CHAIN OK on all three goldens. clippy -D warnings
+clean. Acceptance met: sealing the golden short log reproduces its hashes
+(golden_all_chains_fsck), fsck passes on every golden.
