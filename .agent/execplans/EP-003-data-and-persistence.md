@@ -134,9 +134,6 @@ test — if M2's failpoint test flakes, that is a real bug, not test debt
 (anti-fixation: diagnose, don't widen timeouts).
 
 ## 12. Progress
-- [ ] M1 store  - [ ] M2 writer+crash  - [ ] M3 load/render  - [ ] M4 rebuild
-- [ ] M5 compaction  - [ ] M6 delete/ttl  - [ ] M7 api+contract
-## 12. Progress
 - [x] M1 object store + append + dedup   - [x] M2 crash-order recovery
 - [x] M3 load/render + signed URLs        - [x] M4 rebuild-index
 - [x] M5 compaction                       - [x] M6 delete + TTL sweep
@@ -165,4 +162,8 @@ test — if M2's failpoint test flakes, that is a real bug, not test debt
 - 404 (not 403) for unknown sessions — no ID oracle (SPEC-005).
 
 ## 15. Outcomes & Retrospective
-## 15. Outcomes & Retrospective
+- All 7 milestones verified against live Redis + MinIO. The single-writer +
+  log-is-truth design held under the crash-order injection; the two real bugs
+  the tests caught (content-hash dedup, index-tip verification) are exactly
+  the class of failure this plan exists to prevent.
+
