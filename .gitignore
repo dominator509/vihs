@@ -1,0 +1,14 @@
+# Rust
+/target
+
+# Python pod
+/pod/.venv
+__pycache__/
+*.pyc
+
+# Secrets — never commit
+.env
+
+# Local artifacts
+.test-artifacts/
+*.log
