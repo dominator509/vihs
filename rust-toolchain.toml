@@ -1,0 +1,6 @@
+# Pinned toolchain (ENVIRONMENT.md: Rust 1.79+). Use the exact stable
+# version installed on the dev box; rustup will fetch it if missing.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"
