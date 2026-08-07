@@ -1,0 +1,12 @@
+# Checklist: Validation (stack-specific)
+- [ ] sh scripts/lint.sh → LINT OK (clippy -D warnings; ruff)
+- [ ] sh scripts/format-check.sh → FORMAT OK
+- [ ] sh scripts/typecheck.sh → TYPECHECK OK (cargo check; mypy strict)
+- [ ] sh scripts/test-unit.sh → UNIT OK
+- [ ] sh scripts/test-integration.sh → INTEGRATION OK (dev services up)
+- [ ] sh scripts/test-e2e.sh → E2E OK (mock stages)
+- [ ] sh scripts/build.sh → BUILD OK
+- [ ] sh scripts/security-check.sh → SECURITY OK
+- [ ] sh scripts/dependency-audit.sh → AUDIT OK
+- [ ] sh scripts/smoke-test.sh → SMOKE OK
+- [ ] sh scripts/verify.sh → VERIFY OK (the roll-up gate)

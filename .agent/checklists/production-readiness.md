@@ -1,0 +1,13 @@
+# Checklist: Production Readiness (summary; PRODUCTION_READINESS.md is normative)
+- [ ] Functionality: five core outcomes demonstrated on staging.
+- [ ] Tests: verify + invariant + chaos suites green on the tag.
+- [ ] Security: SECURITY.md checklist + drills (authz, pod scope, delete).
+- [ ] Privacy: TTL sweep, export, deletion audit verified.
+- [ ] Performance: derived cap configured; SLIs in budget on a full pod.
+- [ ] Accessibility: client keyboard/captions/contrast rows green.
+- [ ] Observability: dashboards live; alerts loaded + test-fired.
+- [ ] Deployment: staging deploys clean twice; post-deploy smoke automated.
+- [ ] Rollback: drill executed ≤10 min with smoke green.
+- [ ] Backups: restore drill + fleet chain-fsck green.
+- [ ] Docs: runbooks cover every alert; root docs current.
+- [ ] Support: escalation path named; known risks listed.

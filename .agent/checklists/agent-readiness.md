@@ -1,0 +1,14 @@
+# Checklist: Agent Readiness (before starting any ExecPlan)
+- [ ] Exactly one ExecPlan is ACTIVE in .agent/PLANS.md.
+- [ ] The plan is self-contained (all 15 sections present, no TBDs in M-rows).
+- [ ] Exact files to read and files to change are listed.
+- [ ] Every milestone has an exact validation command from COMMANDS.md.
+- [ ] Every validation has an expected output/result stated.
+- [ ] Acceptance criteria are observable behaviors, not intentions.
+- [ ] Non-goals are explicit.
+- [ ] AGENTS.md STOP conditions read and understood.
+- [ ] Recovery instructions exist per milestone.
+- [ ] Bounded-retry rule (AGENTS §7) understood.
+- [ ] Diff-review rule (expected changed files) understood.
+- [ ] No required information is outside the repository (no hidden context).
+- [ ] No vague requirements remain (if found: fix the plan first, log it).
