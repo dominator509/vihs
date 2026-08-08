@@ -125,9 +125,44 @@ Orchestrator state is Redis + memoryd — restart-safe by construction; the
 integ suite restarts orchestrator mid-flow once to prove it.
 
 ## 12. Progress
-- [ ] M1 registry+assign  - [ ] M2 scaler sims  - [ ] M3 public+resume
-- [ ] M4 admin+drain+static  - [ ] M5 scripts/CI
+- [x] M1 registry+assign  - [x] M2 scaler sims  - [x] M3 public+resume
+- [x] M4 admin+drain+static  - [x] M5 scripts/CI
 
 ## 13. Surprises & Discoveries
+- `tokio::sync::RwLock::blocking_write()` panics inside an async runtime —
+  the registry used it from handlers/tests. Switched the registry's ordered
+  view to `std::sync::RwLock` (tiny critical sections, synchronous callers).
+- axum 0.8 `Message::Text` takes `Utf8Bytes`, not `String` — every send site
+  needs `.into()`; the tungstenite direction (pod-ward) needs `.to_string()`.
+- `pod_ws.by_ref().split()` twice = two mutable borrows; split once into
+  `(sink, stream)`.
+- Scaler floor-protection bug found by `lull_cooldown_then_terminate`: the
+  rule counted live pods without subtracting terminations already decided in
+  the SAME pass — two idle pods at floor=1 were both terminated. Fixed with a
+  `pending_terminations` counter; property test `property_floor_never_violated`
+  now guards it.
+- `MemorydClient::new` must prepend `http://` to the host:port env value —
+  reqwest rejects bare `host:port` URLs.
+- `memoryd create_session` forwards the caller's bearer token; passing "" was
+  rejected by even the permissive dev authorizer (non-empty token required).
+- MCP contract tests need `Content-Type: application/json` on the oneshot
+  request or axum's `Json` extractor rejects before the handler runs.
+- Fake-pod integration tests must bind the echo server FIRST and register the
+  real bound address in the registry — `127.0.0.1:0` is not dialable.
+
 ## 14. Decision Log
+- ADR-011 implementation: mcpd is a pure proxy — zero business logic, each
+  `vihs_*` tool maps 1:1 to an orchestrator HTTP twin route and forwards the
+  client bearer token unchanged. `handle_rpc` lives in lib.rs (contract
+  tests drive it via oneshot); main.rs only wires POST /.
+- Assign WS is NOT a stub: the pod holds it open and receives real SPEC-003
+  `assign` frames via an mpsc channel registered in `AppState.pod_assign`.
+  The router pushes the frame on every assignment (integrates the internal
+  pod API with the public resume flow).
+- Registry `PodState` gains `versions: Option<Value>` so the SPEC-003
+  register contract field (`{pod_id, addr, cap, versions}`) is genuinely
+  consumed, not silently dropped.
+- mcpd requires `orchestrator` as a dev-dependency for its contract tests
+  (it spawns a real orchestrator listener to proxy against).
+
 ## 15. Outcomes & Retrospective
