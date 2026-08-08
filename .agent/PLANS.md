@@ -5,9 +5,9 @@ system change. A new agent with no prior conversation must be able to
 continue from the ExecPlan alone.
 
 ## Active plan
-Exactly one ExecPlan is ACTIVE at a time. Current: **EP-004 (ACTIVE)** —
-EP-003 is DONE. Update this line when a plan completes; the next plan in
-ROADMAP order becomes ACTIVE unless the user says othe...[truncated]
+Exactly one ExecPlan is ACTIVE at a time. Current: **EP-005 (ACTIVE)** —
+EP-004 is DONE. Update this line when a plan completes; the next plan in
+ROADMAP order becomes ACTIVE unless the user says otherwise.
 
 Status legend: PENDING → ACTIVE → DONE (or SKIPPED with recorded reason).
 | EP | Status | | EP | Status |
@@ -15,9 +15,9 @@ Status legend: PENDING → ACTIVE → DONE (or SKIPPED with recorded reason).
 | 000 | SKIPPED (greenfield) | | 006 | PENDING |
 | 001 | DONE | | 007 | PENDING |
 | 002 | DONE | | 008 | PENDING |
-| 003 | ACTIVE | | 009 | PENDING |
-| 004 | PENDING | | 010 | PENDING |
-| 005 | PENDING | | | |
+| 003 | DONE | | 009 | PENDING |
+| 004 | DONE | | 010 | PENDING |
+| 005 | ACTIVE | | | |
 
 ## Required sections (every ExecPlan, in order)
 1 Purpose / Big Picture · 2 Scope · 3 Non-goals · 4 Context and Orientation ·
