@@ -12,6 +12,19 @@ use vihs_core::event::Event;
 use crate::index::RedisIndex;
 use crate::store::{ObjectStore, S3Store, ARTIFACT_TRANSCRIPT};
 
+/// Extract the session owner from the log's create note (the orchestrator's
+/// session-create appends a system note carrying `meta.owner`). Owner binding
+/// is restored on rebuild so SPEC-005 A1 survives Redis loss (EP-007 M3).
+pub fn owner_from_log(values: &[serde_json::Value]) -> Option<String> {
+    values.iter().find_map(|v| {
+        if v["kind"].as_str() == Some("note") && v["role"].as_str() == Some("system") {
+            v["meta"]["owner"].as_str().map(|o| o.to_string())
+        } else {
+            None
+        }
+    })
+}
+
 pub async fn rebuild_index(store: &Arc<S3Store>, index: &Arc<RedisIndex>) {
     let sessions = match store.list_sessions().await {
         Ok(s) => s,
@@ -40,8 +53,12 @@ pub async fn rebuild_index(store: &Arc<S3Store>, index: &Arc<RedisIndex>) {
                     .map(|v| v["turn_id"].as_u64().unwrap_or(0))
                     .max()
                     .unwrap_or(0);
+                let owner = owner_from_log(&values);
                 let seq = store.max_seq(&sid).await.unwrap_or(None).unwrap_or(0);
-                if let Err(e) = index.heal(&sid, &tip, last_turn, count, seq).await {
+                if let Err(e) = index
+                    .heal(&sid, &tip, last_turn, count, seq, owner.as_deref())
+                    .await
+                {
                     error!("rebuild: heal failed for {sid}: {e}");
                     continue;
                 }

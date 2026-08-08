@@ -127,12 +127,22 @@ pub async fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
         }
     }
 
+    // Warm the in-memory session cache from Redis (EP-007 M3 GAP-M3-4): the
+    // orchestrator's session index is a cache over memoryd's durable owner
+    // zsets. After a restart (required for token re-seed after Redis loss),
+    // every surviving session would 404 without this warm-up.
+    let sessions = SessionIndex::new();
+    match sessions.warm_from_redis(&cfg.redis_url).await {
+        Ok(n) => tracing::info!("session index warm-up: {n} sessions restored"),
+        Err(e) => tracing::warn!("session index warm-up skipped: {e}"),
+    }
+
     Arc::new(AppState {
         cfg,
         memoryd,
         registry: PodRegistry::new(),
         provider,
-        sessions: SessionIndex::new(),
+        sessions,
         queue: SessionQueue::new(),
         relay: RelayHandle::new(),
         pod_assign: PodAssignChannels::new(),

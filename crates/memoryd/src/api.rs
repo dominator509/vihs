@@ -63,6 +63,12 @@ fn error_response(e: MemorydError) -> Response {
         MemorydError::Authz(crate::error::AuthzErr::NotFound) => {
             (StatusCode::NOT_FOUND, "not_found", false)
         }
+        // GAP-M3-5: an upstream (Redis) failure during token verification is
+        // retryable — NEVER a 401, which would poison the client's credential
+        // state on a transient outage (SPEC-006 retryable split).
+        MemorydError::Authz(crate::error::AuthzErr::Upstream(_)) => {
+            (StatusCode::SERVICE_UNAVAILABLE, "retryable", true)
+        }
         MemorydError::Authz(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
         MemorydError::IntegrityHold(_) => (StatusCode::CONFLICT, "integrity_hold", false),
         MemorydError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false),
@@ -314,6 +320,20 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
+/// SPEC-006 "Redis down: memoryd/orchestrator fail readyz" (EP-007 M3):
+/// readyz pings Redis and returns 503 when the index is unreachable —
+/// healthz stays a pure liveness probe, readyz is the dependency check.
+async fn readyz(State(st): State<Arc<ApiState>>) -> Response {
+    match st.index.ping().await {
+        Ok(()) => (StatusCode::OK, "ok").into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({"error": {"code": "unavailable", "message": e.to_string(), "retryable": true}})),
+        )
+            .into_response(),
+    }
+}
+
 pub fn router(state: Arc<ApiState>) -> Router {
     Router::new()
         .route("/v1/sessions/{sid}/events", post(append_event))
@@ -323,7 +343,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/v1/sessions/{sid}/compact", post(compact_session))
         .route("/v1/sessions/{sid}", axum::routing::delete(delete_session))
         .route("/healthz", get(healthz))
-        .route("/readyz", get(healthz))
+        .route("/readyz", get(readyz))
         .with_state(state)
 }
 

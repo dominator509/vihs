@@ -62,6 +62,16 @@ async fn rebuild_reconstructs_index_from_store() {
         .unwrap();
 
     let handle = registry.get(&sid);
+    // Mirror the orchestrator's create flow (SPEC-005 A1): a system note
+    // carrying meta.owner is the FIRST event — rebuild must restore the
+    // owner binding from it (EP-007 M3 GAP-M3-3).
+    let create_note = json!({
+        "v": 1, "session_id": sid.as_str(), "turn_id": 0,
+        "ts": "2026-07-05T09:00:00.000Z", "role": "system", "kind": "note",
+        "text": "session created",
+        "meta": {"interrupted": false, "owner": "test-owner"}
+    });
+    handle.append(create_note).await.unwrap();
     handle.append(utt(&sid, 1, "user", "one")).await.unwrap();
     handle
         .append(utt(&sid, 1, "assistant", "two"))
@@ -70,7 +80,8 @@ async fn rebuild_reconstructs_index_from_store() {
     handle.append(utt(&sid, 2, "user", "three")).await.unwrap();
 
     let before = index.snapshot(&sid).await.unwrap();
-    assert_eq!(before.event_count, Some(3));
+    assert_eq!(before.event_count, Some(4));
+    assert_eq!(before.owner.as_deref(), Some("test-owner"));
     assert!(before.tip_hash.is_some());
 
     // FLUSH Redis — the cache is gone; the store is untouched.
@@ -85,6 +96,13 @@ async fn rebuild_reconstructs_index_from_store() {
     assert_eq!(after.tip_hash, before.tip_hash, "tip rebuilt");
     assert_eq!(after.last_turn_id, before.last_turn_id, "last turn rebuilt");
     assert_eq!(after.seq, before.seq, "seq rebuilt");
+    // GAP-M3-3: the owner binding MUST survive Redis loss + rebuild, or the
+    // user 404s their own session (SPEC-005 A1 / SPEC-006 recovery row).
+    assert_eq!(
+        after.owner.as_deref(),
+        Some("test-owner"),
+        "owner restored from create note after rebuild"
+    );
 
     memoryd::sweep::hard_delete(&sid, &store, &index, Some("test-owner"))
         .await

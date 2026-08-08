@@ -121,7 +121,17 @@ async fn replay_tip_from_log(
         .max()
         .unwrap_or(0);
     let seq = store.max_seq(sid).await?.unwrap_or(0);
-    index.heal(sid, &tip, last_turn, count, seq).await?;
+    // Crash-order recovery (EP-007 M3): if the index record is missing
+    // entirely (Redis loss), restore the owner binding from the log too —
+    // otherwise the session heals into an owner-less 404 for its user.
+    let owner = if index.snapshot(sid).await.is_ok() {
+        None
+    } else {
+        crate::rebuild::owner_from_log(&values)
+    };
+    index
+        .heal(sid, &tip, last_turn, count, seq, owner.as_deref())
+        .await?;
     Ok((tip, last_turn, count, seq))
 }
 

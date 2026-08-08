@@ -167,9 +167,20 @@ async fn hard_cap_blocks_second_assignment() {
 #[tokio::test]
 async fn session_index_roundtrip() {
     let st = orch_state().await;
+    // Unique owner per run: the dev Redis is shared across tests in this
+    // binary (parallel), and build_state warms the index from owner zsets
+    // at startup (EP-007 M3 GAP-M3-4) — a fixed owner would absorb another
+    // test's sessions (e.g. register_ready_assign_flow's session-fake-1).
+    let owner = format!(
+        "owner-roundtrip-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
     st.sessions
         .upsert(
-            "owner-1",
+            &owner,
             SessionMeta {
                 session_id: "s-1".into(),
                 updated_at: "2026-07-07T18:22:31.482Z".into(),
@@ -179,7 +190,7 @@ async fn session_index_roundtrip() {
         .await;
     st.sessions
         .upsert(
-            "owner-1",
+            &owner,
             SessionMeta {
                 session_id: "s-2".into(),
                 updated_at: "2026-07-08T09:00:00.000Z".into(),
@@ -187,12 +198,12 @@ async fn session_index_roundtrip() {
             },
         )
         .await;
-    let list = st.sessions.list("owner-1").await;
+    let list = st.sessions.list(&owner).await;
     assert_eq!(list.len(), 2);
     // Newest first.
     assert_eq!(list[0].session_id, "s-2");
-    assert!(st.sessions.get("owner-1", "s-1").await.is_some());
-    assert!(st.sessions.get("owner-1", "nope").await.is_none());
+    assert!(st.sessions.get(&owner, "s-1").await.is_some());
+    assert!(st.sessions.get(&owner, "nope").await.is_none());
     assert!(
         st.sessions.get("owner-2", "s-1").await.is_none(),
         "owner isolation"

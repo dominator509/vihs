@@ -101,6 +101,18 @@ impl TokenStore {
         })
     }
 
+    /// Redis reachability probe (SPEC-006 readyz, EP-007 M3). Shared by the
+    /// orchestrator's readiness gate; the token store IS the orchestrator's
+    /// Redis dependency (sessions index is an in-memory cache).
+    pub async fn ping(&self) -> Result<(), TokenError> {
+        let mut conn = self.redis.clone();
+        let _: String = redis::cmd("PING")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| TokenError::Upstream(format!("redis ping: {e}")))?;
+        Ok(())
+    }
+
     /// Mint a token: generate 32 random bytes, store `argon2id(token+pepper)`
     /// under `token:{token_id}`, return the opaque base64url token.
     pub async fn mint(

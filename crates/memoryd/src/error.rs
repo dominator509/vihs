@@ -56,4 +56,10 @@ pub enum AuthzErr {
     /// oracle; SPEC-006 mapping).
     #[error("session not found")]
     NotFound,
+    /// Upstream (Redis/token-store) failure during verification. NOT a
+    /// credential verdict: the token may be fine; the store was unreachable.
+    /// Mapped to 503 retryable (EP-007 M3 GAP-M3-5) — never 401, which would
+    /// poison the client's credential state on a transient outage.
+    #[error("upstream: {0}")]
+    Upstream(String),
 }

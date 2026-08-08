@@ -45,6 +45,16 @@ impl RedisIndex {
         Ok(RedisIndex { conn })
     }
 
+    /// Redis reachability probe (SPEC-006 readyz, EP-007 M3).
+    pub async fn ping(&self) -> Result<(), IndexErr> {
+        let mut conn = self.conn.clone();
+        let _: String = redis::cmd("PING")
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| IndexErr::Redis(e.to_string()))?;
+        Ok(())
+    }
+
     /// Register a new session (create path). Returns the index snapshot.
     pub async fn create_session(
         &self,
@@ -143,6 +153,9 @@ impl RedisIndex {
     }
 
     /// Heal the index from a verified log replay (crash recovery / rebuild).
+    /// `owner` is restored from the log's create note (meta.owner) — SPEC-005
+    /// A1 requires the owner binding to survive Redis loss (EP-007 M3):
+    /// without it, an owner-less record 404s every owner-scoped Load/Delete.
     pub async fn heal(
         &self,
         sid: &SessionId,
@@ -150,21 +163,33 @@ impl RedisIndex {
         last_turn: u64,
         event_count: u64,
         seq: u64,
+        owner: Option<&str>,
     ) -> Result<(), IndexErr> {
         let mut conn = self.conn.clone();
         let key = session_key(sid);
-        conn.hset_multiple::<&str, &str, &str, ()>(
-            &key,
-            &[
-                ("tip_hash", tip),
-                ("last_turn_id", &last_turn.to_string()),
-                ("event_count", &event_count.to_string()),
-                ("seq", &seq.to_string()),
-                ("updated_at", &Utc::now().to_rfc3339()),
-            ],
-        )
-        .await
-        .map_err(|e| IndexErr::Redis(e.to_string()))?;
+        let mut fields: Vec<(&str, String)> = vec![
+            ("tip_hash", tip.to_string()),
+            ("last_turn_id", last_turn.to_string()),
+            ("event_count", event_count.to_string()),
+            ("seq", seq.to_string()),
+            ("updated_at", Utc::now().to_rfc3339()),
+        ];
+        let mut zadd: Option<(String, String)> = None;
+        if let Some(owner) = owner {
+            fields.push(("owner", owner.to_string()));
+            fields.push(("created_at", Utc::now().to_rfc3339()));
+            zadd = Some((owner_sessions_key(owner), sid.as_str().to_string()));
+        }
+        let refs: Vec<(&str, &str)> = fields.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        conn.hset_multiple::<&str, &str, &str, ()>(&key, &refs)
+            .await
+            .map_err(|e| IndexErr::Redis(e.to_string()))?;
+        if let Some((zkey, member)) = zadd {
+            let _: i64 = conn
+                .zadd(zkey.as_str(), member.as_str(), Utc::now().timestamp())
+                .await
+                .map_err(|e| IndexErr::Redis(e.to_string()))?;
+        }
         Ok(())
     }
 

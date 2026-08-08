@@ -178,7 +178,17 @@ async fn list_sessions_empty_contract() {
 #[tokio::test]
 async fn list_sessions_shows_created() {
     let st = state().await;
-    let tok = mint(&st, "owner-list", Scope::User).await;
+    // Unique owner per run: the dev Redis is shared across runs and the
+    // session index is warmed from owner zsets at startup (EP-007 M3
+    // GAP-M3-4), so a fixed owner would see residue from earlier runs.
+    let owner = format!(
+        "owner-list-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let tok = mint(&st, &owner, Scope::User).await;
     let app = app(st);
     let (_, _) = send_json(
         &app,

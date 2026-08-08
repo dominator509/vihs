@@ -6,6 +6,7 @@ use std::time::Instant;
 
 use axum::{
     extract::{ws::WebSocketUpgrade, Path, State},
+    response::IntoResponse,
     routing::get,
     Router,
 };
@@ -150,6 +151,9 @@ async fn ws_signal(
 }
 
 fn app(state: Arc<AppState>) -> Router {
+    // SPEC-006 "Redis down: memoryd/orchestrator fail readyz" (EP-007 M3):
+    // readyz pings the token store's Redis; healthz stays pure liveness.
+    let readyz_state = state.clone();
     Router::new()
         .merge(public_routes())
         .merge(admin_routes())
@@ -157,7 +161,24 @@ fn app(state: Arc<AppState>) -> Router {
         .merge(client_routes())
         .route("/v1/signal/{connection_id}", get(ws_signal))
         .route("/healthz", get(|| async { "ok" }))
-        .route("/readyz", get(|| async { "ok" }))
+        .route(
+            "/readyz",
+            get(move || {
+                let st = readyz_state.clone();
+                async move {
+                    match st.tokens.ping().await {
+                        Ok(()) => (axum::http::StatusCode::OK, "ok").into_response(),
+                        Err(e) => (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            axum::Json(serde_json::json!({
+                                "error": {"code": "unavailable", "message": e.to_string(), "retryable": true}
+                            })),
+                        )
+                            .into_response(),
+                    }
+                }
+            }),
+        )
         .with_state(state)
 }
 

@@ -51,11 +51,10 @@ impl Authorizer for TokenAuthorizer {
         if token.is_empty() {
             return Err(AuthzErr::MissingToken);
         }
-        let p = self
-            .store
-            .verify(token)
-            .await
-            .map_err(|_| AuthzErr::InvalidToken)?;
+        let p = self.store.verify(token).await.map_err(|e| match e {
+            vihs_auth::TokenError::Authz(_) => AuthzErr::InvalidToken,
+            vihs_auth::TokenError::Upstream(m) => AuthzErr::Upstream(m),
+        })?;
         let scope = p.scope;
         let owner = p.owner.clone();
         tracing::debug!(

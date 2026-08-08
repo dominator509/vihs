@@ -73,6 +73,23 @@ async fn healthz_ok() {
 }
 
 #[tokio::test]
+async fn readyz_ok_when_redis_reachable() {
+    // SPEC-006: readyz fails when Redis is down. With dev Redis up it must
+    // be 200 (EP-007 M3 — this used to be a static "ok" with no probe).
+    let resp = app()
+        .await
+        .oneshot(
+            Request::builder()
+                .uri("/readyz")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
 async fn append_then_transcript_contract() {
     let app = app().await;
     let sid = SessionId::new();

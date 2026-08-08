@@ -63,7 +63,7 @@ Chaos tests spawn their own processes; safe to re-run; a wedged run is
 cleaned by dev-services down/up (dev only).
 
 ## 12. Progress
-- [x] M1 pod kill  - [x] M2 memoryd pause  - [ ] M3 torn/rebuild
+- [x] M1 pod kill  - [x] M2 memoryd pause  - [x] M3 torn/rebuild
 - [ ] M4 capacity harness  - [ ] M5 audit+CI
 
 M1 notes (validation `sh scripts/chaos.sh` = kill_pod_midturn OK / CHAOS OK;
@@ -129,6 +129,28 @@ verify.sh includes both chaos gates):
   debugging), retries at DEBUG per SPEC-006 logging rules.
 
 ## 13. Surprises & Discoveries
+- M3: The two chaos drills exposed FIVE real product gaps (GAP-M3-1..5,
+  logged with evidence in `.agent/execplans/EP-007-M3-gap-log.md` BEFORE
+  fixing, per protocol). All five were spec-mandated behavior the chaos
+  suite must demonstrate: 409 integrity_hold on the public surface,
+  readyz failing on Redis down, owner restore across rebuild, session
+  index warm-up on restart, and retryable (503) upstream token-store
+  failures instead of a poisoned 401.
+- M3: memoryd's long-lived Redis connection does NOT survive a Redis
+  container bounce (`docker stop/start`) — the pooled pipe goes stale and
+  EVERY token verify fails until the service is restarted. SPEC-006's
+  documented recovery ("on recovery or replacement") is therefore a
+  service restart; the redis_loss drill now performs it explicitly and
+  asserts the honest sequence (readyz 503 while down → 200 after recovery
+  → restart → FLUSHALL → rebuild-index → restart orchestrator → session
+  + transcript identical). The connection retry/reconnect config remains
+  a backlog item; the 503 retryable classification makes the failure
+  honest in the meantime.
+- M3: `ensure_services()` (run_e2e) only healthz-checks, and healthz is
+  unconditional "ok" — so a stale stack from an earlier drill is
+  considered healthy. Chaos drills must establish their OWN known-good
+  baseline (restart the services they will fault) instead of trusting
+  healthz.
 - M2: The pod's "committed turn" logging fires AFTER enqueue, not after the
   event is durable — so "committed" in pod logs means "produced + queued",
   not "in the store". The chaos suite must read durability from memoryd
@@ -160,6 +182,32 @@ verify.sh includes both chaos gates):
   Health surfaces depth/degraded for operators instead of log noise.
 - M2: Exposed extra buffer diagnostics in /health (queued, in_flight,
   flusher_alive) beyond depth/degraded — additive only; no consumer breakage.
+- M3: Chaos tests probe PUBLIC surfaces only (orchestrator 8080 + memoryd
+  8091 HTTP). Rationale: a drill that exercises internal APIs can pass while
+  the user-visible contract is broken; the M3 drills were deliberately
+  surface-level and that is exactly how the five gaps surfaced.
+- M3: Torn-write fixture = mutate a payload field keeping JSON valid
+  (invalid JSON would fail parsing, not chain verification). fsck
+  recomputes hashes, so a valid-JSON payload mutation produces BadHash →
+  integrity_hold — the honest "torn" signal.
+- M3: `--rebuild-index` does NOT auto-repair a torn chain: it fscks, logs
+  `fsck failed`, and exits 0, leaving the session under integrity_hold.
+  This is deliberate (SPEC-006: chain verification failure = integrity_hold,
+  never silent repair); the drill asserts the session stays 409 after
+  rebuild.
+- M3: redis_loss drill restarts memoryd + orchestrator at START (known-good
+  baseline) and AGAIN after Redis recovery — the second restart is the
+  SPEC-006-documented "on recovery or replacement" recovery, and the first
+  is the drill's own precondition. The orchestrator restart also re-seeds
+  the .env admin/pod tokens into the wiped store (tokens live in Redis).
+- M3: teardown must be state-aware. First verify.sh run after the drill
+  FAILED at the mcpd contract gate (`upstream: memoryd http error sending
+  request`) because the drill's `finally` killed the memoryd/orchestrator
+  it had restarted — even though both were ALREADY running when the gate
+  began (verify.sh runs chaos between test-e2e and build/smoke). Fix:
+  capture `pre_running` from `ss -tlnp` before the drill and, in teardown,
+  stop only restarted services that were NOT pre-existing. Verified both
+  ways: standalone (starts + cleans up) and in-gate (restarts + leaves up).
 
 ## 15. Outcomes & Retrospective
 M2 delivered the R2 append buffer (real spec gap found while scoping: pod
@@ -171,4 +219,32 @@ with BOTH chaos gates (kill_pod_midturn + memoryd_pause) in the permanent
 gate. Remaining risk documented: ~1 s per-append argon2 latency bounds how
 much of the in-flight turn survives a pod kill (INV-3-sanctioned); a
 token-verify cache is the backlog item if per-append durability matters in
-production. Next: M3 torn_write_fsck + redis_loss_rebuild.
+production.
+
+M3 delivered the two chaos proofs + FIVE product gap fixes:
+- torn_write_fsck: corrupt a COPY of a log (valid JSON, payload mutated →
+  BadHash) → public resume returns 409 integrity_hold, memoryd /load 409,
+  rebuild-index fscks and logs `fsck failed`, session stays 409 (never
+  auto-repaired). GREEN.
+- redis_loss_rebuild: create + commit → Redis DOWN (readyz 503 on BOTH
+  services) → recover (readyz 200) → restart memoryd (fresh connection,
+  GAP-M3-5) → FLUSHALL → old token 401 → rebuild-index restores index +
+  owner → restart orchestrator (tokens re-seeded, SessionIndex warmed
+  from owner zsets, GAP-M3-4) → fresh token → session visible + transcript
+  IDENTICAL to the pre-loss snapshot. GREEN.
+- Gap fixes (all logged first, verified live): GAP-M3-1 orchestrator
+  surfaces memoryd 409 integrity_hold as 409 (was 503); GAP-M3-2 readyz
+  pings Redis on both services (503 while down, verified live); GAP-M3-3
+  rebuild/heal restore owner + owner zset from the create-note meta.owner;
+  GAP-M3-4 SessionIndex warm-up on orchestrator restart; GAP-M3-5 memoryd
+  authz classifies upstream token-store failures as 503 retryable (never
+  a poisoned 401). memoryd suites: 21 tests green (authz 10, integ 10,
+  lib 1).
+- Remaining risks: (1) memoryd's Redis connection has no retry/reconnect
+  config — a Redis bounce requires the documented service restart; the 503
+  retryable classification keeps that honest. (2) ~1 s argon2 per-append
+  latency (M2 backlog, unchanged). (3) cargo-audit RUSTSECs via
+  aws-smithy (pre-existing, `|| echo` swallow).
+Next: M4 capacity/latency harness (CI-mode; real run is the EP-010/staging
+step, STOP S1 without a GPU host — RUNPOD_API_KEY is the only missing
+credential, needed at EP-009).

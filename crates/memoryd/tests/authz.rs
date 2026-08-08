@@ -360,6 +360,7 @@ async fn authz_ownerless_record_binds_on_append() {
             0,
             0,
             0,
+            None,
         )
         .await
         .unwrap();

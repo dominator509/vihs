@@ -62,6 +62,60 @@ impl OrchError {
 
 impl From<crate::memoryd_client::MemorydClientError> for OrchError {
     fn from(e: crate::memoryd_client::MemorydClientError) -> Self {
+        // SPEC-006 "Chain verification failure on load": memoryd returns
+        // 409 integrity_hold; the orchestrator MUST preserve that on the
+        // public resume/connect surface (SPEC-003 resume row) instead of
+        // collapsing every memoryd status to Upstream (503). EP-007 M3
+        // torn_write_fsck proves this end-to-end.
+        if let crate::memoryd_client::MemorydClientError::Status(status, body) = &e {
+            if *status == 409 && body.contains("integrity_hold") {
+                return OrchError::IntegrityHold(body.clone());
+            }
+        }
         OrchError::Upstream(e.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::memoryd_client::MemorydClientError;
+
+    #[test]
+    fn memoryd_409_integrity_hold_maps_to_conflict() {
+        // SPEC-003 resume row: 409 integrity_hold on the public surface.
+        let err = MemorydClientError::Status(
+            409,
+            r#"{"error":{"code":"integrity_hold","message":"chain broken","retryable":false}}"#
+                .into(),
+        );
+        let orch: OrchError = err.into();
+        assert!(matches!(orch, OrchError::IntegrityHold(_)));
+        assert_eq!(orch.code(), "integrity_hold");
+        assert_eq!(orch.status(), axum::http::StatusCode::CONFLICT);
+        assert!(!orch.retryable());
+    }
+
+    #[test]
+    fn memoryd_409_other_code_stays_upstream() {
+        // A 409 that is NOT integrity_hold must not be misclassified.
+        let err = MemorydClientError::Status(
+            409,
+            r#"{"error":{"code":"other","message":"x","retryable":true}}"#.into(),
+        );
+        let orch: OrchError = err.into();
+        assert!(matches!(orch, OrchError::Upstream(_)));
+        assert_eq!(orch.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[test]
+    fn memoryd_503_stays_upstream() {
+        let err = MemorydClientError::Status(
+            503,
+            r#"{"error":{"code":"retryable","message":"store","retryable":true}}"#.into(),
+        );
+        let orch: OrchError = err.into();
+        assert!(matches!(orch, OrchError::Upstream(_)));
+        assert!(orch.retryable());
     }
 }
