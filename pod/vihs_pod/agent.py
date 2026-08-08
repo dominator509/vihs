@@ -176,7 +176,7 @@ class PodAgent:
             resume,
         )
         memory = MemoryClient(f"http://{self.memoryd_addr}", pod_token=pod_token)
-        stages, monitor = build_stages(self.mock_answers)
+        stages, monitor = build_stages(self.mock_answers, real=self.real_stages)
         convo = Conversation(
             session_id=session_id,
             connection_id=connection_id,

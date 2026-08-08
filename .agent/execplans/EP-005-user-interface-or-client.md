@@ -174,7 +174,7 @@ reruns are exact.
 
 ## 12. Progress
 - [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [x] M4 agent
-- [x] M5 client E2E  - [x] M6 latency  - [ ] M7 real adapters
+- [x] M5 client E2E  - [x] M6 latency  - [x] M7 real adapters
 
 ## 13. Surprises & Discoveries
 ### M1-M3
@@ -237,6 +237,19 @@ reruns are exact.
   replaced with a closure using default-arg binding.
 - `_e2e_ff_recorded` must be a dataclass field, not a dynamic attribute:
   mypy strict rejects `setattr`-style assignments on typed classes.
+### M7
+- The AXIOM gateway contract was read from the live repo
+  (`packages/llm-gateway/src/routes.ts`), not assumed: SSE
+  `data: {"content": chunk}`, bearer auth, `policy`/`egress` body fields —
+  the adapter matches the actual server, so stage/prod swap needs no
+  gateway changes.
+- Lazy-imported external deps (`faster_whisper`, `gi`) trip mypy's
+  import-not-found under strict mode — each needs an explicit
+  `# type: ignore[import-not-found]`, and the lazy loader needs a return
+  annotation (`Any`) or `no-untyped-call` fires at every call site.
+- `GStreamerMux._ensure` initially hard-imported `gi`, which broke the
+  ledger unit test in CI — the ledger is transport-independent and must
+  not require GStreamer to exist.
 
 ## 14. Decision Log
 - D1 (M1-M3): Keep `flow.py` as the task-graph module; re-export from
@@ -283,4 +296,18 @@ reruns are exact.
 - D16 (M6): `e2e_first_frame` is recorded once per turn (guarded by a
   dataclass field, not a dynamic attribute) at the first audio mux push —
   the pipeline's first-frame completion point.
+- D17 (M7): real adapters live in `pipeline/{llm,stt,tts,vad,lipsync,mux}.py`
+  (the §6 file list), config-gated — external deps (httpx transport,
+  faster-whisper, Piper binary, GStreamer) are imported lazily so CI
+  never pays for them. The ADR-012 `axiom-gateway` LLM provider streams
+  `POST {VIHS_LLM_URL}/chat/stream` SSE against the AXIOM contract read
+  from routes.ts (`data: {"content": chunk}`, bearer token,
+  `{messages, model, policy, stream, egress}`).
+- D18 (M7): `GStreamerMux` degrades to ledger-only mode when `gi` is
+  absent (CI) — the INV-1 ledger is maintained by the pod regardless of
+  transport; the real appsrc graph is built at EP-009 staging.
+- D19 (M7): `build_stages(real=True)` swaps real adapters behind
+  `PROVIDER` (axiom-gateway|vllm|mock); `SileroVAD` uses a deterministic
+  RMS energy gate until EP-009 staging (weights path is an S1 credential
+  stop), documented in the module.
 ## 15. Outcomes & Retrospective

@@ -84,8 +84,46 @@ class PlaybackMonitor:
         return replace(self._current, played_ms=min(played_ms, self._current.dur_ms))
 
 
-def build_stages(answers: list[str] | None = None) -> tuple[SimpleNamespace, PlaybackMonitor]:
-    """Mock stages + playback monitor (CI-safe; M7 swaps real adapters)."""
+def build_stages(
+    answers: list[str] | None = None, *, real: bool = False
+) -> tuple[SimpleNamespace, PlaybackMonitor]:
+    """Stage container for one conversation.
+
+    Mock stages are CI-safe and deterministic (the E2E gate). `real=True`
+    constructs the M7 real adapters, config-gated by env: the LLM stage is
+    the ADR-012 axiom-gateway provider when `PROVIDER=axiom-gateway`,
+    local vLLM when `PROVIDER=vllm`, and the mock scripted LLM otherwise.
+    Real TTS/STT/VAD/LipSync/Mux constructors are lazy (they only touch
+    subprocess/GStreamer at first stream()), so building them here is safe
+    even where the binaries are absent.
+    """
+    if real:
+        import os
+
+        from vihs_pod.pipeline.lipsync import StubLipSync
+        from vihs_pod.pipeline.llm import VLLMLLM, AxiomGatewayLLM
+        from vihs_pod.pipeline.mux import GStreamerMux
+        from vihs_pod.pipeline.tts import PiperTTS
+
+        provider = os.environ.get("PROVIDER", "mock")
+        llm_url = os.environ.get("VIHS_LLM_URL", "http://127.0.0.1:8000/v1")
+        llm_token = os.environ.get("VIHS_LLM_TOKEN", "")
+        if provider == "axiom-gateway":
+            llm: Any = AxiomGatewayLLM(url=llm_url, token=llm_token)
+        elif provider == "vllm":
+            llm = VLLMLLM(url=llm_url, token=llm_token or None)
+        else:
+            from vihs_pod.mocks.stages import ScriptedLLM
+
+            llm = ScriptedLLM(answers or [])
+        tts: Any = PiperTTS()
+        lipsync: Any = StubLipSync()
+        mux: Any = GStreamerMux()
+        monitor = PlaybackMonitor(mux)
+        # VAD is built but not wired into the mock user-input path (the E2E
+        # harness types text); it is exercised by its own unit tests.
+        return SimpleNamespace(llm=llm, tts=tts, lipsync=lipsync, mux=monitor), monitor
+
     from vihs_pod.mocks.stages import MockLipSync, MockMux, MockTTS, ScriptedLLM
 
     llm = ScriptedLLM(answers or [])
