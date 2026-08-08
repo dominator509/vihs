@@ -14,18 +14,26 @@ from vihs_pod.pipeline.protocols import AudioChunk, Frame
 
 
 class MockLLM:
-    """Emits a fixed scripted response one token at a time."""
+    """Emits a fixed scripted response one token at a time.
+
+    `ttft` (seconds) simulates time-to-first-token for the M6 latency
+    harness; default 0 keeps existing tests fast.
+    """
 
     def __init__(
         self,
         response: str = "Hello there. This is a longer answer. How are you?",
         delay: float = 0.001,
+        ttft: float = 0.0,
     ) -> None:
         self.response = response
         self.delay = delay
+        self.ttft = ttft
 
     async def stream(self, prompt: str) -> AsyncIterator[str]:
         # Emit character-by-character to exercise the chunker.
+        if self.ttft > 0:
+            await asyncio.sleep(self.ttft)
         for ch in self.response:
             await asyncio.sleep(self.delay)
             yield ch
@@ -36,17 +44,25 @@ class ScriptedLLM:
 
     The E2E harness scripts the conversation: answer 1 is long (barge-in
     target), answer 2 acknowledges. Real adapters replace this in M7.
+    `ttft` (seconds) simulates time-to-first-token (M6 latency harness).
     """
 
     def __init__(
-        self, answers: list[str], fallback: str = "Understood.", delay: float = 0.001
+        self,
+        answers: list[str],
+        fallback: str = "Understood.",
+        delay: float = 0.001,
+        ttft: float = 0.0,
     ) -> None:
         self._answers = list(answers)
         self._fallback = fallback
         self.delay = delay
+        self.ttft = ttft
 
     async def stream(self, prompt: str) -> AsyncIterator[str]:
         answer = self._answers.pop(0) if self._answers else self._fallback
+        if self.ttft > 0:
+            await asyncio.sleep(self.ttft)
         for ch in answer:
             await asyncio.sleep(self.delay)
             yield ch
@@ -56,10 +72,13 @@ class MockTTS:
     """Converts a clause into audio chunks with known dur/chars coverage.
 
     One chunk per clause: chars_covered = len(clause), dur_ms proportional.
+    `ttfa` (seconds) simulates time-to-first-audio for the M6 latency
+    harness; default 0 keeps existing tests fast.
     """
 
-    def __init__(self, ms_per_char: int = 10) -> None:
+    def __init__(self, ms_per_char: int = 10, ttfa: float = 0.0) -> None:
         self.ms_per_char = ms_per_char
+        self.ttfa = ttfa
 
     async def stream(self, clause: str, voice: str) -> AsyncIterator[AudioChunk]:
         # Cover the RAW clause (whitespace included): the ledger slices the
@@ -68,16 +87,29 @@ class MockTTS:
         n = len(clause)
         if n == 0:
             return
+        if self.ttfa > 0:
+            await asyncio.sleep(self.ttfa)
         pcm = b"\x00" * (n * 16)  # fake mono 16-bit samples
         yield AudioChunk(pcm=pcm, dur_ms=n * self.ms_per_char, chars_covered=n)
 
 
 class MockLipSync:
-    """Emits one timed frame per audio chunk."""
+    """Emits one timed frame per audio chunk.
+
+    `ff` (seconds) simulates time-to-first-frame for the M6 latency
+    harness; default 0 keeps existing tests fast.
+    """
+
+    def __init__(self, ff: float = 0.0) -> None:
+        self.ff = ff
 
     async def frames(self, audio: AsyncIterator[AudioChunk]) -> AsyncIterator[Frame]:
         pts = 0
+        first = True
         async for chunk in audio:
+            if first and self.ff > 0:
+                await asyncio.sleep(self.ff)
+                first = False
             yield Frame(data=b"\x01" * 8, pts_ms=pts)
             pts += chunk.dur_ms
 

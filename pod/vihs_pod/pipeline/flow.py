@@ -7,6 +7,7 @@ bus-guarded. Every handoff checks the generation counter.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -47,21 +48,30 @@ async def run_response(
     turn_id: int,
     ledger: dict[int, str],
     on_caption: Any = None,  # Callable[[int, str], Awaitable[None]] — live deltas
+    metrics: Any = None,  # Metrics (EP-005 M6) — first-chunk latency samples
 ) -> Committed:
     """Clause-pipelined response. Returns the committed turn.
 
     `ledger` maps clause_id → text so abort reconstruction can slice exact
     spans (INV-1). `on_caption(turn_id, delta)` is awaited per audio chunk
     with the exact text that chunk covers — the live caption path (SPEC-004).
+    `metrics` (optional) records LLM TTFT, TTS TTFA, lip-sync first frame,
+    e2e first-frame, and e2e total latency samples (ARCHITECTURE §6).
     """
+    _t0 = time.perf_counter()
     clauses: asyncio.Queue[Clause] = asyncio.Queue(maxsize=4)
     audio: asyncio.Queue[Tagged] = asyncio.Queue(maxsize=16)
 
     async def brain() -> None:
         ck, n = ClauseChunker(), 0
+        _llm_start = time.perf_counter()
+        _first = True
         async for delta in st.llm.stream(prompt):
             if gen != bus.fresh():
                 return  # stale: drop
+            if _first and metrics is not None:
+                metrics.record("llm_ttft", (time.perf_counter() - _llm_start) * 1000.0)
+                _first = False
             for c in ck.feed(delta):
                 n += 1
                 ledger[n] = c
@@ -78,9 +88,14 @@ async def run_response(
             if cl is END:
                 break
             start = 0
+            _tts_start = time.perf_counter()
+            _first = True
             async for ch in st.tts.stream(cl.text, "default"):
                 if gen != bus.fresh():
                     return
+                if _first and metrics is not None:
+                    metrics.record("tts_ttfa", (time.perf_counter() - _tts_start) * 1000.0)
+                    _first = False
                 span = (start, start + ch.chars_covered)
                 start += ch.chars_covered
                 if on_caption is not None:
@@ -89,6 +104,8 @@ async def run_response(
         await audio.put(END)  # type: ignore[arg-type]
 
     async def face_and_wire() -> None:
+        _ff_start = time.perf_counter()
+        _first = True
         while True:
             tg = await audio.get()
             if tg is END:
@@ -96,8 +113,14 @@ async def run_response(
             if gen != bus.fresh():
                 return
             async for fr in st.lipsync.frames(_one(tg.chunk)):
+                if _first and metrics is not None:
+                    metrics.record("lipsync_ff", (time.perf_counter() - _ff_start) * 1000.0)
+                    _first = False
                 await st.mux.push(fr, tg.clause_id, tg.span)
             await st.mux.push(tg.chunk, tg.clause_id, tg.span)
+            if metrics is not None and not metrics._e2e_ff_recorded:
+                metrics.record("e2e_first_frame", (time.perf_counter() - _t0) * 1000.0)
+                metrics._e2e_ff_recorded = True
 
     tasks = [asyncio.create_task(f()) for f in (brain, voice, face_and_wire)]
     for t in tasks:
@@ -106,6 +129,8 @@ async def run_response(
 
     played = await st.mux.flush_and_report()
     text = committed_text(ledger, played)
+    if metrics is not None:
+        metrics.record("e2e_total", (time.perf_counter() - _t0) * 1000.0)
     return Committed(text=text, interrupted=False, clauses=dict(ledger))
 
 

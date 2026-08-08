@@ -174,7 +174,7 @@ reruns are exact.
 
 ## 12. Progress
 - [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [x] M4 agent
-- [x] M5 client E2E  - [ ] M6 latency  - [ ] M7 real adapters
+- [x] M5 client E2E  - [x] M6 latency  - [ ] M7 real adapters
 
 ## 13. Surprises & Discoveries
 ### M1-M3
@@ -229,6 +229,14 @@ reruns are exact.
   chunks as played; the mux ledger also accumulated across turns. Both
   masked barge-in correctness (INV-1) until the harness checked exact
   committed text.
+### M6
+- The plan §7 `run_response` signature listed `m: Metrics` as a required
+  param, but M3 tests call it positionally without one — the metrics param
+  is optional (superset contract), preserving all existing callers.
+- ruff B023 (lambda binds loop variable) fired on the percentile helper —
+  replaced with a closure using default-arg binding.
+- `_e2e_ff_recorded` must be a dataclass field, not a dynamic attribute:
+  mypy strict rejects `setattr`-style assignments on typed classes.
 
 ## 14. Decision Log
 - D1 (M1-M3): Keep `flow.py` as the task-graph module; re-export from
@@ -265,4 +273,14 @@ reruns are exact.
 - D13 (M5): conversation loop is task-based (response runs concurrently);
   the awaited-loop version queued barge-in input until the full turn
   finished — INV-1 could never fire.
+- D14 (M6): `Metrics` lives in `pod/vihs_pod/metrics.py` (stdlib only);
+  `run_response` takes an OPTIONAL `metrics` param so existing callers and
+  tests are untouched (the §7 contract signature is a superset).
+- D15 (M6): mock stages gain `ttft`/`ttfa`/`ff` delay params (default 0 —
+  existing tests stay fast); the M6 latency harness tunes them to the
+  ARCHITECTURE §6 budget midpoints (LLM 275 ms, TTS 200 ms, lip-sync
+  250 ms) and asserts e2e first-frame ≤ sum + 150 ms slack.
+- D16 (M6): `e2e_first_frame` is recorded once per turn (guarded by a
+  dataclass field, not a dynamic attribute) at the first audio mux push —
+  the pipeline's first-frame completion point.
 ## 15. Outcomes & Retrospective
