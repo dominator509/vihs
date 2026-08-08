@@ -173,9 +173,31 @@ milestone's pytest selector to locate state; mocks are deterministic so
 reruns are exact.
 
 ## 12. Progress
-- [ ] M1 units  - [ ] M2 context+client  - [ ] M3 pipeline  - [ ] M4 agent
+- [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [ ] M4 agent
 - [ ] M5 client E2E  - [ ] M6 latency  - [ ] M7 real adapters
 
 ## 13. Surprises & Discoveries
+- `run_response`/`abort_response` live in `pipeline/flow.py`, not
+  `pipeline/__init__.py` (plan §7); `__init__` re-exports them so the
+  package surface matches the plan contract.
+- AbortBus added as `pipeline/abort_bus.py` — the SPEC-001 D3 primitive;
+  not in the §6 files-to-change list because it is part of the FSM/ledger
+  contract (SPEC-001 reference code), not a menu-row adapter.
+- Mocks consolidated into `mocks/stages.py` (plan listed per-stage files
+  stt/llm/tts/lipsync/vad): one deterministic module keeps CI exact; real
+  adapters get their own files in M7.
+- `Mux.push` takes `item: object` (plan: `Frame|AudioChunk`) — widens the
+  contract without weakening it; call sites enforce the union.
+- pyproject.toml needs `asyncio_mode = "auto"` for pytest-asyncio async
+  tests; requirements.lock gains pytest-asyncio + httpx (memory client).
+- Mock TTS must cover the raw clause text INCLUDING whitespace so ledger
+  `chars_covered` math is byte-exact (test_pipeline_flow relies on it).
+
 ## 14. Decision Log
+- D1 (M1-M3): Keep `flow.py` as the task-graph module; re-export from
+  `pipeline/__init__.py`. Smallest reversible option; matches §7 surface.
+- D2 (M1-M3): `Mux.push(item: object, ...)` instead of the union type —
+  widens safely; typed unions enforced at call sites.
+- D3 (M1-M3): Consolidated mocks in `mocks/stages.py`; per-stage files
+  deferred to M7 with the real adapters they mock.
 ## 15. Outcomes & Retrospective

@@ -18,6 +18,7 @@ markers = [
     "integration: requires dev services (Redis/MinIO)",
     "e2e: full loopback run",
 ]
+asyncio_mode = "auto"
 addopts = "-q"
 
 [tool.ruff]
