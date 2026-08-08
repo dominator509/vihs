@@ -3,7 +3,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 for s in preflight lint format-check typecheck test-unit test-integration \
-         test-e2e build security-check dependency-audit smoke-test; do
+         test-e2e chaos build security-check dependency-audit smoke-test; do
   echo "== verify: $s =="
   sh "scripts/$s.sh"
 done

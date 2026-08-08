@@ -63,8 +63,34 @@ Chaos tests spawn their own processes; safe to re-run; a wedged run is
 cleaned by dev-services down/up (dev only).
 
 ## 12. Progress
-- [ ] M1 pod kill  - [ ] M2 memoryd pause  - [ ] M3 torn/rebuild
+- [x] M1 pod kill  - [ ] M2 memoryd pause  - [ ] M3 torn/rebuild
 - [ ] M4 capacity harness  - [ ] M5 audit+CI
+
+M1 notes (validation `sh scripts/chaos.sh` = kill_pod_midturn OK / CHAOS OK;
+full verify.sh includes the chaos gate):
+- NEW `tests/chaos/kill_pod_midturn.py` — SPEC-006 "Pod death" row proven on
+  public surfaces only: commit turn 1 → send the LONG answer → SIGKILL the
+  pod mid-clause-2 playback → poll /admin/pods until the orchestrator marks
+  it dead (stale ping >15 s) → start a FRESH pod → resume the SAME session
+  (resume=True, cursor last_turn_id≥1) → turn 3 commits on the new pod →
+  INV-1 asserted (killed turn's unplayed tail "before finishing." NEVER in
+  the transcript) → chain-fsck fleet-sweep via `memoryd --rebuild-index`
+  (fscks every session) with no `fsck failed`.
+- NEW `scripts/chaos.sh` gate (SKIPs pre-EP-007) + test-e2e.sh `chaos`
+  target; verify.sh now runs the chaos gate after test-e2e.
+- Findings: (1) the harness keeps ONE WS per conversation — reconnecting the
+  same ClientPeer after close is a real aiortc error ("RTCPeerConnection is
+  closed"); each connection needs a fresh peer. (2) ClientPeer constructs
+  RTCPeerConnection in __init__, which requires a LIVE event loop — the
+  chaos script must run entirely under one asyncio.run. (3) `_start_pod_agent`
+  without MOCK_ANSWERS silently uses the pod's default scripted answers —
+  pass the e2e MOCK_ANSWERS so turn 2 is the long barge-in target.
+- Pre-existing (NOT M1-introduced): the dev MinIO store had ~685 orphaned
+  session dirs from earlier milestone runs, including 3 with broken chains
+  (torn prev_hash, turn_id regressions — dated Aug 7, before EP-006/007
+  work). The chaos fsck sweep failed on THOSE until `dev-services.sh
+  down/up` flushed the disposable dev store (AGENTS §13). Logged; a clean
+  dev store is the documented recovery.
 
 ## 13. Surprises & Discoveries
 ## 14. Decision Log
