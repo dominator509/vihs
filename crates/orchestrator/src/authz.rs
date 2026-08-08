@@ -4,22 +4,11 @@
 use crate::error::OrchError;
 use crate::tokens::TokenStore;
 
+pub use vihs_auth::{Principal, Scope};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verb {
     Session,
-    Admin,
-    Pod,
-}
-
-#[derive(Debug, Clone)]
-pub struct Principal {
-    pub owner: String,
-    pub scope: Scope,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Scope {
-    User,
     Admin,
     Pod,
 }

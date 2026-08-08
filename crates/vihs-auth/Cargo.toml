@@ -1,0 +1,15 @@
+[package]
+name = "vihs-auth"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+redis = { workspace = true }
+argon2 = { workspace = true }
+base64 = { workspace = true }
+rand = { workspace = true }
+chrono = { version = "0.4", features = ["serde"] }
+

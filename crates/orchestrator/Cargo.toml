@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 vihs-core = { path = "../vihs-core" }
+vihs-auth = { path = "../vihs-auth" }
 axum = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

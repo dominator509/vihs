@@ -21,6 +21,7 @@ use crate::error::MemorydError;
 use crate::index::RedisIndex;
 use crate::store::{ObjectStore, S3Store, ARTIFACT_MEMORY, ARTIFACT_TRANSCRIPT};
 use crate::writer::{AppendResult, WriterRegistry};
+use vihs_auth::Scope;
 use vihs_core::chain::fsck;
 use vihs_core::event::Event;
 use vihs_core::ids::SessionId;
@@ -54,6 +55,14 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 fn error_response(e: MemorydError) -> Response {
     let (status, code, retryable) = match &e {
         MemorydError::Invalid(_) => (StatusCode::BAD_REQUEST, "invalid", false),
+        // SPEC-006 mapping: missing/invalid token → 401, scope violation on a
+        // non-session route → 403, foreign-or-unknown session → 404 (A4).
+        MemorydError::Authz(crate::error::AuthzErr::Forbidden) => {
+            (StatusCode::FORBIDDEN, "forbidden", false)
+        }
+        MemorydError::Authz(crate::error::AuthzErr::NotFound) => {
+            (StatusCode::NOT_FOUND, "not_found", false)
+        }
         MemorydError::Authz(_) => (StatusCode::UNAUTHORIZED, "unauthorized", false),
         MemorydError::IntegrityHold(_) => (StatusCode::CONFLICT, "integrity_hold", false),
         MemorydError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found", false),
@@ -82,7 +91,29 @@ async fn append_event(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, &sid, Verb::Append)?;
+    let principal = st.authz.allow(&token, &sid, Verb::Append).await?;
+    // Create-path owner binding (SPEC-005 A1): the orchestrator's
+    // session-create appends a system note with the caller's user token.
+    // The index record may not exist yet (first append) OR may be a
+    // heal-only record without an owner (rebuild/recovery — heal does not
+    // touch owner). Bind the owner in BOTH cases so every later owner check
+    // is meaningful. Pod tokens never stamp: a session's owner is the user,
+    // never the session id itself.
+    if !matches!(principal.scope, Scope::Pod) {
+        let needs_stamp = match st.index.snapshot(&sid).await {
+            Ok(s) => s.owner.as_deref() != Some(principal.owner.as_str()),
+            Err(_) => true,
+        };
+        if needs_stamp {
+            let now = chrono::Utc::now().to_rfc3339();
+            st.index
+                .create_session(&sid, &principal.owner, &now)
+                .await?;
+            tracing::debug!(sid = %sid.as_str(), owner = %principal.owner, "authz create-path owner stamped");
+        } else {
+            tracing::debug!(sid = %sid.as_str(), "authz record owner already bound");
+        }
+    }
     let handle = st.registry.get(&sid);
     match handle.append(body).await? {
         AppendResult::Committed { hash, turn_id } => Ok((
@@ -107,7 +138,7 @@ async fn load_session(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, &sid, Verb::Load)?;
+    st.authz.allow(&token, &sid, Verb::Load).await?;
     let snap = st
         .index
         .snapshot(&sid)
@@ -146,7 +177,7 @@ async fn get_memory(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, &sid, Verb::Load)?;
+    st.authz.allow(&token, &sid, Verb::Load).await?;
     st.index
         .snapshot(&sid)
         .await
@@ -185,7 +216,7 @@ async fn get_transcript(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, &sid, Verb::Load)?;
+    st.authz.allow(&token, &sid, Verb::Load).await?;
     st.index
         .snapshot(&sid)
         .await
@@ -223,7 +254,7 @@ async fn compact_session(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, &sid, Verb::Append)?;
+    st.authz.allow(&token, &sid, Verb::Append).await?;
     let deps = CompactDeps {
         store: st.store.clone(),
         index: st.index.clone(),
@@ -250,7 +281,7 @@ async fn delete_session(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, &sid, Verb::Delete)?;
+    let principal = st.authz.allow(&token, &sid, Verb::Delete).await?;
     st.index
         .snapshot(&sid)
         .await
@@ -276,7 +307,9 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .with_state(state)
 }
 
-/// Convenience used by main: build an ApiState with default dev authz.
+/// Convenience used by storage-level integration tests: an ApiState with the
+/// permissive dev authorizer (the strict TokenAuthorizer is wired in main.rs
+/// and exercised by tests/authz.rs).
 pub fn dev_state(
     cfg: Config,
     store: Arc<S3Store>,

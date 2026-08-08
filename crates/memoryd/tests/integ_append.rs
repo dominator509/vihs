@@ -34,6 +34,10 @@ fn test_config() -> Config {
         "VIHS_S3_SECRET_KEY",
         env_or("VIHS_S3_SECRET_KEY", "minioadmin"),
     );
+    std::env::set_var(
+        "VIHS_TOKEN_PEPPER",
+        std::env::var("VIHS_TOKEN_PEPPER").unwrap_or_else(|_| "test-memoryd-pepper".into()),
+    );
     Config::from_env()
 }
 

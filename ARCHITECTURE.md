@@ -25,10 +25,12 @@ untouched.
 ## 2. Repository map (intended; enforced from EP-001)
 ```
 /
-  Cargo.toml                  # workspace: vihs-core, memoryd, orchestrator
+  Cargo.toml                  # workspace: vihs-core, vihs-auth, memoryd, orchestrator, mcpd
   crates/
     vihs-core/                # shared types, event schema, hash chain,
                               # deterministic render, chain-fsck bin
+    vihs-auth/                # shared token store (mint/verify/revoke),
+                              # Scope/Principal, argon2id+pepper (SPEC-005)
     memoryd/                  # Session Memory Service (single writer)
     orchestrator/             # router, autoscaler, signaling, auth gateway
     mcpd/                     # MCP server (ADR-011): thin adapter over the
@@ -55,10 +57,17 @@ untouched.
 ## 3. Layer responsibilities and dependency rules
 - `vihs-core` (Layer 0): event schema, canonical encoding, blake3 hash chain,
   markdown render, ID types. Depends on nothing else in the workspace.
+- `vihs-auth` (Layer 0): the shared token store — mint/seed/verify/revoke,
+  Scope/Principal, argon2id+pepper params (SPEC-005). Added in EP-006 M3 so
+  memoryd verifies tokens minted by orchestrator with ONE implementation and
+  ONE pepper (VIHS_TOKEN_PEPPER); duplicating the crypto per service would
+  let the peppers drift and break cross-service verify. Imports nothing from
+  the service crates (vihs-core only, transitively none).
 - `memoryd` (Layer 1): owns the append-only event log; the only writer (INV-2).
-  Imports `vihs-core`. Must not import `orchestrator`.
+  Imports `vihs-core` and `vihs-auth`. Must not import `orchestrator`.
 - `orchestrator` (Layer 1): sessions, routing, autoscaling, signaling, auth.
-  Imports `vihs-core`. Must not import `memoryd` (talks to it over HTTP only).
+  Imports `vihs-core` and `vihs-auth`. Must not import `memoryd` (talks to it
+  over HTTP only).
 - `pod/` (data plane): stateless pipeline. Talks to orchestrator (signaling,
   health) and memoryd (append, fetch memory.md) over the network only. Holds
   no durable state (INV-3).

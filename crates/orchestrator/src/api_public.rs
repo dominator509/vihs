@@ -113,6 +113,7 @@ async fn connect_session(
         &st.registry,
         &st.memoryd,
         &st.pod_assign,
+        &st.tokens,
         &session_id,
         &token,
     )

@@ -22,7 +22,30 @@ const SPEC_003: &str = concat!(
     "/../../.agent/specs/SPEC-003-api-contracts.md"
 );
 
+/// EP-006 M3: the strict network memoryd verifies tokens with the pepper in
+/// .env (VIHS_TOKEN_PEPPER). The cargo-test process does NOT source .env, so
+/// build_state would fall back to an ephemeral pepper and mint tokens the
+/// memoryd service rejects. Inject the same pepper before building state.
+fn ensure_shared_pepper() {
+    if std::env::var("VIHS_TOKEN_PEPPER").is_ok() {
+        return;
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env");
+    if let Ok(text) = std::fs::read_to_string(&root) {
+        for line in text.lines() {
+            if let Some(v) = line.strip_prefix("VIHS_TOKEN_PEPPER=") {
+                let v = v.trim();
+                if !v.is_empty() {
+                    std::env::set_var("VIHS_TOKEN_PEPPER", v);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 async fn state() -> Arc<AppState> {
+    ensure_shared_pepper();
     let mut cfg = Config::from_env();
     cfg.warm_pool_floor = 1;
     let mem = MemorydClient::new(&cfg.memoryd_addr);

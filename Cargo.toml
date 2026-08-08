@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vihs-core", "crates/memoryd", "crates/orchestrator", "crates/mcpd"]
+members = ["crates/vihs-core", "crates/vihs-auth", "crates/memoryd", "crates/orchestrator", "crates/mcpd"]
 
 [workspace.package]
 version = "0.1.0"

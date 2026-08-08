@@ -52,4 +52,8 @@ pub enum AuthzErr {
     InvalidToken,
     #[error("forbidden")]
     Forbidden,
+    /// Foreign-or-unknown session — 404, never 403 (SPEC-005 A4: no ID
+    /// oracle; SPEC-006 mapping).
+    #[error("session not found")]
+    NotFound,
 }

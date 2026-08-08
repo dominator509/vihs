@@ -11,15 +11,40 @@
 
 use std::sync::Arc;
 
+use orchestrator::authz::Scope;
 use orchestrator::config::Config as OrchConfig;
 use orchestrator::memoryd_client::MemorydClient;
 use orchestrator::registry::{PodPhase, PodRegistry};
 use orchestrator::router;
 use orchestrator::session_index::SessionMeta;
+use orchestrator::tokens::DEFAULT_TOKEN_TTL;
 use orchestrator::{build_state, AppState};
 use serde_json::{json, Value};
 
+/// EP-006 M3: the strict network memoryd verifies tokens with the pepper in
+/// .env (VIHS_TOKEN_PEPPER). The cargo-test process does NOT source .env, so
+/// build_state would fall back to an ephemeral pepper and mint tokens the
+/// memoryd service rejects. Inject the same pepper before building state.
+fn ensure_shared_pepper() {
+    if std::env::var("VIHS_TOKEN_PEPPER").is_ok() {
+        return;
+    }
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.env");
+    if let Ok(text) = std::fs::read_to_string(&root) {
+        for line in text.lines() {
+            if let Some(v) = line.strip_prefix("VIHS_TOKEN_PEPPER=") {
+                let v = v.trim();
+                if !v.is_empty() {
+                    std::env::set_var("VIHS_TOKEN_PEPPER", v);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 async fn orch_state() -> Arc<AppState> {
+    ensure_shared_pepper();
     let mut cfg = OrchConfig::from_env();
     cfg.provider = "mock".to_string();
     cfg.warm_pool_floor = 1;
@@ -57,12 +82,19 @@ async fn register_ready_assign_flow() {
 
     // The real flow: session created via memoryd first (orchestrator create
     // appends the durable "session created" note), then resume/connect loads.
+    // M3: the token must be a REAL store-minted user token — memoryd now
+    // verifies it (owner "owner-1" gets stamped on the session record).
+    let user_tok = st
+        .tokens
+        .mint("owner-1", Scope::User, DEFAULT_TOKEN_TTL)
+        .await
+        .expect("mint user token");
     st.memoryd
         .create_session(
             "session-fake-1",
             "owner-1",
             &chrono::Utc::now().to_rfc3339(),
-            "user-token",
+            &user_tok,
         )
         .await
         .expect("memoryd create_session must succeed");
@@ -73,8 +105,9 @@ async fn register_ready_assign_flow() {
         &registry,
         &st.memoryd,
         &st.pod_assign,
+        &st.tokens,
         "session-fake-1",
-        "user-token",
+        &user_tok,
     )
     .await
     .expect("assign must succeed with a ready pod + live memoryd");
@@ -119,6 +152,7 @@ async fn hard_cap_blocks_second_assignment() {
         &registry,
         &st.memoryd,
         &st.pod_assign,
+        &st.tokens,
         "session-fake-2",
         "user-token",
     )

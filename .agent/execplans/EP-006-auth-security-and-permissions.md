@@ -69,8 +69,43 @@ checklist rows all checkable.
 Token tests namespace token_ids; revocation tests clean up. Re-runnable.
 
 ## 12. Progress
-- [x] M1 tokens  - [x] M2 orch matrix  - [ ] M3 memoryd/pod scope
+- [x] M1 tokens  - [x] M2 orch matrix  - [x] M3 memoryd/pod scope
 - [ ] M4 limits+redaction  - [ ] M5 client+e2e
+
+M3 notes (validation `cargo test -p memoryd authz` = 10 green; workspace
+110 green; clippy 0; fmt clean; VERIFY OK):
+- NEW crate `crates/vihs-auth` (Layer 0, ARCHITECTURE.md updated): the shared
+  TokenStore (mint/seed/verify/revoke) + Scope/Principal/TokenError +
+  POD_TOKEN_TTL (15 min). ONE implementation so orchestrator AND memoryd
+  verify each other's tokens with ONE pepper (VIHS_TOKEN_PEPPER). 7 unit
+  tests incl. cross-store pepper mismatch regression.
+- Orchestrator: tokens.rs/authz.rs re-export vihs-auth (error bridge
+  TokenError→OrchError). `router::assign` mints a REAL session-bound pod
+  token (owner=session_id, scope Pod, 15-min TTL) instead of the bare-UUID
+  `pod_token()` helper (removed). The pod agent already consumed the frame's
+  pod_token for memoryd calls — it now carries a verifiable token.
+- Memoryd: async TokenAuthorizer — admin all verbs; pod Append/Load only AND
+  owner==path id (else 404 no-oracle); user owner-match (else 404) with the
+  create/bind path (Append may bind an owner-less record — rebuild/heal
+  recovery). AuthzErr::NotFound added; SPEC-006 mapping 401/403/404 split in
+  error_response. 6 call sites `.await`ed. Config REQUIRES VIHS_TOKEN_PEPPER
+  (memoryd verifies tokens minted by another process — an ephemeral pepper
+  is broken by design); main.rs wires the strict authorizer.
+- Create-path owner binding is IDEMPOTENT: stamps when the record is missing
+  OR has no owner (heal-only records from rebuild/recovery would otherwise be
+  permanently inaccessible). Fixes the parallel-suite race where
+  integ_rebuild's heal created owner-less records before integ_assign's
+  create_session (root-caused via RUST_LOG=memoryd=debug authz tracing).
+- VIHS_TOKEN_PEPPER generated (43-char base64url) in .env; ENVIRONMENT.md row
+  widened to `all` with shared-across-services note; .env.example row.
+- Tests: crates/memoryd/tests/authz.rs (10 — pod second-session 404, pod
+  forbidden verb 403, signed-URL X-Amz-Expires=900, user foreign 404,
+  missing/invalid 401, owner delete, ownerless bind); ensure_shared_pepper()
+  helper in the 5 test files that hit the network memoryd (cargo-test does
+  not source .env — without it build_state mints with an ephemeral pepper
+  the strict memoryd rejects); integ_assign mints real tokens; pod
+  MemoryClient fixture mints a real user token via POST /admin/tokens
+  (spawning the orchestrator if needed).
 
 M2 notes (validation `cargo test -p orchestrator --test authz_matrix` = 3 green;
 workspace 97 green; clippy 0; fmt clean; VERIFY OK):
@@ -104,6 +139,29 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   3-target E2E gate GREEN.
 
 ## 13. Surprises & Discoveries
+- M3: the strict owner check exposed a parallel-suite race — the memoryd
+  `integ_rebuild` test replays the WHOLE shared bucket and `heal()`s every
+  session, creating index records with NO owner field. A fixed-sid test
+  (integ_assign's `session-fake-1`) then 404'd its own create_session because
+  the record pre-existed owner-less. Root cause was found only via
+  RUST_LOG=memoryd=debug authz tracing — and the first log read misled: the
+  snap_owner=Some("") was `unwrap_or_default()` rendering a MISSING owner as
+  an empty string, not an actual empty owner field.
+- The pepper-sharing contract bites the TEST harness too: cargo-test does not
+  source .env, so build_state falls back to an EPHEMERAL pepper while the
+  network memoryd verifies with .env's — every cross-process token fails.
+  Fix: `ensure_shared_pepper()` helper (reads .env, sets the var) in the 5
+  test files that drive the network memoryd.
+- The `cargo test -p memoryd authz` milestone command filters by test NAME
+  under the rtk wrapper, not the module path — 0 matched until the tests were
+  renamed with an `authz_` prefix.
+- The assign frame's pod_token was a bare UUID the pod could never use; the
+  pod agent already plumbed it into every memoryd call (agent.py:171) — so
+  minting a REAL session-bound token fixed the whole data path at once.
+- Pre-existing (logged, not M3-introduced): the `.env` display in tool output
+  redacts `="` sequences as `***` — DISPLAY ONLY; actual bytes are correct
+  (verified via ord() inspection) — don't "fix" files that look mangled.
+
 - The assign WS was completely unauthenticated before M2 — any caller could
   open /internal/pods/{id}/assign and receive assign frames. The pod agent
   already sent its bearer header on that socket, so the fix was additive.
@@ -136,6 +194,34 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   delete per COMMANDS.md).
 
 ## 14. Decision Log
+- M3: shared token store moved to NEW crate `vihs-auth` (Layer 0) instead of
+  duplicating the crypto in memoryd. Evidence: SPEC-005 A1 (memoryd verifies
+  tokens minted by orchestrator); vihs-core declares itself pure zero-I/O
+  (lib.rs + ARCHITECTURE.md §3), so auth gets its own crate. Two independent
+  implementations of the same pepper+argon2 logic is exactly the drift the
+  milestone exists to prevent. ARCHITECTURE.md updated (L2 spec-update with
+  this evidence).
+- M3: memoryd REQUIRES VIHS_TOKEN_PEPPER (Config::from_env `get()`, len≥16
+  assert). An ephemeral per-process pepper is broken BY DESIGN for memoryd —
+  it verifies tokens minted by another process. Orchestrator keeps the dev
+  ephemeral fallback (EP-006 §9) but .env now sets the shared value so both
+  match in every environment.
+- M3: create-path owner binding is idempotent AND a valid user token may bind
+  an owner-less record on Append (Load/Delete still 404). Heal-only records
+  from rebuild/recovery have no owner; without the bind they are permanently
+  inaccessible. Risk accepted: the first valid user token to append claims an
+  orphaned session — session ids are 128-bit random and only the orchestrator
+  mints tokens, so there is no practical hijack vector. Foreign-owner probes
+  on OWNED sessions still 404 (A4 no-oracle).
+- M3: per-assignment pod tokens are REAL store mints (SPEC-005 A3) — owner =
+  session id, scope Pod, 15-min TTL, minted by `router::assign`, carried in
+  the assign frame. The bare-UUID `pod_token()` helper is deleted; the pod
+  agent's existing frame-token plumbing (agent.py:171) now verifies.
+- M3: the pod MemoryClient pytest fixture mints a REAL user token via
+  POST /admin/tokens (spawning the orchestrator if not running) because the
+  strict memoryd rejects fake tokens. Pod-token semantics (session binding,
+  verbs) are covered by the Rust authz suite — the pytest tests exercise the
+  HTTP contract with a verifiable bearer.
 - M1: env-provided credential seeding (VIHS_POD_TOKEN + VIHS_ADMIN_TOKEN)
   is the dev bootstrap path for the admin mint route. Alternative (hardcoded
   bootstrap admin token) rejected: env-driven matches the existing pepper

@@ -3,13 +3,15 @@
 
 use std::sync::Arc;
 
-use memoryd::api::{dev_state, router};
+use memoryd::api::{router, ApiState};
+use memoryd::authz::TokenAuthorizer;
 use memoryd::config::Config;
 use memoryd::index::RedisIndex;
 use memoryd::rebuild::rebuild_index;
 use memoryd::store::S3Store;
 use memoryd::sweep::ttl_sweep;
 use memoryd::writer::WriterRegistry;
+use vihs_auth::TokenStore;
 
 #[tokio::main]
 async fn main() {
@@ -35,7 +37,20 @@ async fn main() {
     }
 
     let registry = WriterRegistry::new(store.clone(), index.clone());
-    let state = dev_state(cfg.clone(), store.clone(), index.clone(), registry.clone());
+    // Strict authz (EP-006 M3): verify orchestrator-minted tokens against the
+    // SHARED Redis token store + the shared VIHS_TOKEN_PEPPER. The permissive
+    // dev authorizer is test-only now.
+    let tokens = TokenStore::connect(&cfg.redis_url, cfg.token_pepper.clone())
+        .await
+        .expect("token store connect");
+    let authz = TokenAuthorizer::new(tokens, index.clone());
+    let state = Arc::new(ApiState {
+        cfg: cfg.clone(),
+        store: store.clone(),
+        index: index.clone(),
+        registry: registry.clone(),
+        authz: Box::new(authz),
+    });
     let app = router(state);
 
     // Retention sweep task (D-10) — daily, injected clock for tests.

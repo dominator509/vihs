@@ -10,6 +10,7 @@ use crate::error::OrchError;
 use crate::memoryd_client::MemorydClient;
 use crate::provider::{PodId, PodProvider};
 use crate::registry::{PodPhase, PodRegistry};
+use crate::tokens::{Scope, TokenStore, POD_TOKEN_TTL};
 
 pub struct AssignOutcome {
     pub pod_id: PodId,
@@ -46,6 +47,7 @@ pub async fn assign(
     registry: &Arc<PodRegistry>,
     memoryd: &MemorydClient,
     assign_channels: &crate::PodAssignChannels,
+    tokens: &TokenStore,
     session_id: &str,
     user_token: &str,
 ) -> Result<AssignOutcome, OrchError> {
@@ -56,7 +58,10 @@ pub async fn assign(
     let load = memoryd.load(session_id, user_token).await?;
     let resume = load.last_turn_id > 0;
     let connection_id = uuid::Uuid::new_v4().to_string();
-    let pod_token = crate::pod_token();
+    // Real session-bound pod token (SPEC-005 A3): owner IS the session id,
+    // TTL ≤ 15 min. memoryd enforces owner == path id + allowed verbs; the
+    // pod uses this token for every memoryd call during the assignment.
+    let pod_token = tokens.mint(session_id, Scope::Pod, POD_TOKEN_TTL).await?;
 
     // Liveness re-check before committing the assignment: if the channel
     // vanished between pick and send, return no-capacity (never a silent

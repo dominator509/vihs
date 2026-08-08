@@ -1814,6 +1814,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "vihs-auth",
  "vihs-core",
 ]
 
@@ -1913,6 +1914,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "vihs-auth",
  "vihs-core",
 ]
 
@@ -3118,6 +3120,20 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vihs-auth"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "base64",
+ "chrono",
+ "rand 0.8.7",
+ "redis",
+ "serde",
+ "thiserror 2.0.19",
+ "tokio",
+]
 
 [[package]]
 name = "vihs-core"

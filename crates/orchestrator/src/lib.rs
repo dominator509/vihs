@@ -139,11 +139,10 @@ pub async fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
     })
 }
 
-/// Pod token minted for an assignment (SPEC-003 internal assign frame).
-pub fn pod_token() -> String {
-    uuid::Uuid::new_v4().to_string()
-}
-
+/// Pod token minting for an assignment is a REAL store mint (SPEC-005 A3:
+/// session-bound, ≤15 min TTL) — see `router::assign`. There is deliberately
+/// no bare-UUID fallback: an unverifiable token in the assign frame would
+/// 401 every memoryd call the pod makes (EP-006 M3).
 pub fn make_pod_id() -> PodId {
     PodId::new()
 }

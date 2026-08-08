@@ -11,6 +11,10 @@ pub struct Config {
     pub s3_bucket: String,
     pub s3_access_key: String,
     pub s3_secret_key: String,
+    /// Shared token-hash pepper (VIHS_TOKEN_PEPPER). REQUIRED — memoryd
+    /// verifies tokens minted by the orchestrator, so a per-process ephemeral
+    /// pepper would break every cross-service verify (EP-006 M3 Decision Log).
+    pub token_pepper: String,
     pub verbatim_tail: usize,
     pub token_budget: usize,
     pub session_ttl_days: i64,
@@ -35,6 +39,7 @@ impl Config {
             s3_bucket: get("VIHS_S3_BUCKET"),
             s3_access_key: get("VIHS_S3_ACCESS_KEY"),
             s3_secret_key: get("VIHS_S3_SECRET_KEY"),
+            token_pepper: get("VIHS_TOKEN_PEPPER"),
             verbatim_tail: get_opt("COMPACT_VERBATIM_TAIL", "20")
                 .parse()
                 .expect("COMPACT_VERBATIM_TAIL int"),
@@ -61,6 +66,10 @@ impl Config {
             "COMPACT_TOKEN_BUDGET must be >= 100"
         );
         assert!(self.session_ttl_days >= 1, "SESSION_TTL_DAYS must be >= 1");
+        assert!(
+            self.token_pepper.len() >= 16,
+            "VIHS_TOKEN_PEPPER must be at least 16 chars (ENVIRONMENT.md: >= 32 bytes decoded)"
+        );
     }
 
     pub fn store_connect_timeout(&self) -> Duration {
