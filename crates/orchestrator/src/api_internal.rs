@@ -84,12 +84,21 @@ async fn pod_health(
 /// WS /internal/pods/{id}/assign — the pod holds this open; the orchestrator
 /// pushes `assign`/`revoke` frames (SPEC-003 schema) whenever the router
 /// assigns. The pod's initial `{"t":"ready"}` is acked so boot scripts can
-/// synchronize on the channel being live.
+/// synchronize on the channel being live. M2: pod-token authz (Verb::Pod) on
+/// the upgrade — a pod must present its seeded pod token (SPEC-005 A3).
 async fn assign_ws(
     State(st): State<Arc<AppState>>,
     Path(pod_id): Path<String>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    let token = bearer(&headers).unwrap_or_default();
+    if let Err(e) = st.authz.allow(&token, Verb::Pod).await {
+        return axum::Json(json!({
+            "error": {"code": e.code(), "message": e.to_string(), "retryable": e.retryable()}
+        }))
+        .into_response();
+    }
     ws.on_upgrade(move |socket| handle_assign_socket(socket, st, pod_id))
 }
 

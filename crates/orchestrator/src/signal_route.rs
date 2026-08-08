@@ -37,10 +37,14 @@ pub async fn signal_socket(
     ws: WebSocketUpgrade,
 ) -> Response {
     let token = bearer(&headers).unwrap_or_default();
-    // EP-004 permissive authz: any non-empty token passes (EP-006 hardens).
-    if token.is_empty() {
-        return axum::Json(json!({"error": {"code": "unauthorized", "message": "missing token", "retryable": false}}))
-            .into_response();
+    // M2: real authz — the same user token used for the session API. The
+    // connection_id itself is a capability (opaque UUID bound at assign),
+    // but the bearer must still resolve to a valid principal (SPEC-005 A1).
+    if let Err(e) = st.authz.allow(&token, crate::authz::Verb::Session).await {
+        return axum::Json(json!({
+            "error": {"code": e.code(), "message": e.to_string(), "retryable": e.retryable()}
+        }))
+        .into_response();
     }
     ws.on_upgrade(move |socket| handle_signal(socket, st, connection_id))
 }

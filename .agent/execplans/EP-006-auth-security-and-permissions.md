@@ -69,8 +69,22 @@ checklist rows all checkable.
 Token tests namespace token_ids; revocation tests clean up. Re-runnable.
 
 ## 12. Progress
-- [x] M1 tokens  - [ ] M2 orch matrix  - [ ] M3 memoryd/pod scope
+- [x] M1 tokens  - [x] M2 orch matrix  - [ ] M3 memoryd/pod scope
 - [ ] M4 limits+redaction  - [ ] M5 client+e2e
+
+M2 notes (validation `cargo test -p orchestrator --test authz_matrix` = 3 green;
+workspace 97 green; clippy 0; fmt clean; VERIFY OK):
+- authz_matrix.rs: route list PARSED from SPEC-003 "Orchestrator public API"
+  table (section-scoped so memoryd rows are excluded); every session-scoped
+  row covered owner (not 401/404) / foreign (404, never 403) / none (401).
+  New registry rows fail closed until covered.
+- Signaling WS (/v1/signal/{id}): permissive empty-check replaced with real
+  `authz.allow(Verb::Session)` (SPEC-005 A1).
+- Assign WS (/internal/pods/{id}/assign): had NO auth — now requires
+  `authz.allow(Verb::Pod)` on upgrade (SPEC-005 A3); pod sends its seeded
+  token via header (agent.py `self.bearer`).
+- Admin listener: user-token rejection covered for /admin/pods, /admin/scale,
+  /admin/pods/{id}/drain (A6).
 
 M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
 - `tokens.rs`: Redis-backed TokenStore — 32B base64url opaque tokens
@@ -90,6 +104,14 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   3-target E2E gate GREEN.
 
 ## 13. Surprises & Discoveries
+- The assign WS was completely unauthenticated before M2 — any caller could
+  open /internal/pods/{id}/assign and receive assign frames. The pod agent
+  already sent its bearer header on that socket, so the fix was additive.
+- The first matrix attempt parsed the WHOLE SPEC-003 file and picked up
+  memoryd's `/v1/sessions/{id}/events` rows as orchestrator routes → the
+  owner case 404'd. Fixed by section-scoping the parser to the
+  "## Orchestrator public API" block.
+
 - Wiring the strict TokenAuthorizer into `build_state` broke three seams at
   once: (1) no bootstrap admin token existed, so `POST /admin/tokens` was
   unreachable (chicken-and-egg); (2) the legacy `VIHS_POD_TOKEN` dev value
