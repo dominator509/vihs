@@ -302,8 +302,9 @@ async fn drain_pod_gets_no_new_assignments() {
     assert_eq!(body["draining"], true);
 
     // A draining pod must not be picked for assignment (router filters by
-    // Ready phase only).
-    let pick = orchestrator::router::pick(&registry, u32::MAX);
+    // Ready phase + live assign channel).
+    let channels = orchestrator::PodAssignChannels::default();
+    let pick = orchestrator::router::pick(&registry, u32::MAX, &channels);
     assert!(
         pick.is_none(),
         "draining pod must be excluded from assignment picks"

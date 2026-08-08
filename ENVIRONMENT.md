@@ -43,6 +43,7 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_MODEL_DIR | pod | all | /workspace/models | N | network-volume mount | dir exists on pod |
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat endpoint | reachable in real mode |
 | VIHS_REAL_STAGES | no | dev | 0 | N | 1 = real GPU stages | 0/1 |
+| VIHS_MOCK_ANSWERS | no | dev | ["...","..."] | N | scripted mock-LLM answers per turn (E2E) | JSON array of strings |
 | TURN_URL / TURN_USER / TURN_PASS | no | stage,prod | turn:host:3478 | S(creds) | coturn relay | set together |
 | RUST_LOG / VIHS_POD_LOG | no | all | info | N | log levels | valid filter |
 

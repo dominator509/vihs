@@ -107,7 +107,7 @@ async fn connect_session(
         .get(&principal.owner, &session_id)
         .await
         .ok_or_else(|| OrchError::NotFound(session_id.clone()))?;
-    let resume = meta.turns > 0;
+    let _ = meta.turns; // display cache only — resume derives from the durable cursor
 
     match router::assign(
         &st.registry,
@@ -115,7 +115,6 @@ async fn connect_session(
         &st.pod_assign,
         &session_id,
         &token,
-        resume,
     )
     .await
     {
@@ -141,7 +140,6 @@ async fn connect_session(
                 .enqueue(QueuedSession {
                     session_id: session_id.clone(),
                     user_token: token,
-                    resume,
                     queued_at: chrono::Utc::now(),
                 })
                 .await;

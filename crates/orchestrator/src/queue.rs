@@ -11,7 +11,6 @@ use tokio::sync::Mutex;
 pub struct QueuedSession {
     pub session_id: String,
     pub user_token: String,
-    pub resume: bool,
     pub queued_at: chrono::DateTime<chrono::Utc>,
 }
 

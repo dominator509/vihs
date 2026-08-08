@@ -31,6 +31,27 @@ class MockLLM:
             yield ch
 
 
+class ScriptedLLM:
+    """Emits the next scripted answer per stream() call (EP-005 M5).
+
+    The E2E harness scripts the conversation: answer 1 is long (barge-in
+    target), answer 2 acknowledges. Real adapters replace this in M7.
+    """
+
+    def __init__(
+        self, answers: list[str], fallback: str = "Understood.", delay: float = 0.001
+    ) -> None:
+        self._answers = list(answers)
+        self._fallback = fallback
+        self.delay = delay
+
+    async def stream(self, prompt: str) -> AsyncIterator[str]:
+        answer = self._answers.pop(0) if self._answers else self._fallback
+        for ch in answer:
+            await asyncio.sleep(self.delay)
+            yield ch
+
+
 class MockTTS:
     """Converts a clause into audio chunks with known dur/chars coverage.
 
@@ -69,6 +90,10 @@ class MockMux:
         self._reported = False
 
     async def push(self, item: object, clause_id: int, span: tuple[int, int]) -> None:
+        if isinstance(item, AudioChunk):
+            # Simulate on-wire playback duration FIRST: a chunk is only in the
+            # playback ledger once its playback actually completed (INV-1).
+            await asyncio.sleep(item.dur_ms / 1000.0)
         self.items.append((item, clause_id, span))
 
     async def flush_and_report(self) -> list[PlayedSpan]:
@@ -79,6 +104,11 @@ class MockMux:
             if isinstance(item, AudioChunk):
                 spans.append(PlayedSpan(clause_id=clause_id, char_start=span[0], char_end=span[1]))
         return spans
+
+    def reset(self) -> None:
+        """Per-turn ledger reset (INV-1): one response per ledger."""
+        self.items.clear()
+        self._reported = False
 
     @property
     def reported(self) -> bool:

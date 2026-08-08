@@ -28,8 +28,9 @@ import httpx
 import websockets
 from websockets.asyncio.server import ServerConnection
 
-from vihs_pod.health import SignalBridge, serve_pod_surface
-from vihs_pod.webrtc_loopback import run_loopback_proof
+from vihs_pod.conversation import Conversation, build_stages
+from vihs_pod.health import serve_pod_surface
+from vihs_pod.memory_client import MemoryClient
 
 log = logging.getLogger("vihs_pod.agent")
 
@@ -60,6 +61,8 @@ class PodAgent:
         token: str,
         cap: int,
         real_stages: bool = False,
+        memoryd_addr: str = "127.0.0.1:8091",
+        mock_answers: list[str] | None = None,
     ) -> None:
         self.pod_id = pod_id
         self.pod_addr = pod_addr
@@ -67,8 +70,10 @@ class PodAgent:
         self.token = token
         self.cap = max(1, cap)
         self.real_stages = real_stages
-        self._assignments: dict[str, tuple[Any, Any]] = {}
-        self._signal_bridge: SignalBridge | None = None
+        self.memoryd_addr = memoryd_addr
+        self.mock_answers = mock_answers or []
+        self._assignments: dict[str, Conversation] = {}
+        self._conversation: Conversation | None = None
 
     # --- pod local surface ---
 
@@ -83,8 +88,8 @@ class PodAgent:
 
     async def signal_handler(self, conn: ServerConnection) -> None:
         """WS /internal/pods/{id}/signal — relay client frames to the active
-        assignment's SignalBridge and drain pod→client frames back."""
-        bridge = self._signal_bridge
+        conversation's SignalBridge and drain pod→client frames back."""
+        bridge = self._conversation.bridge if self._conversation is not None else None
         if bridge is None:
             await conn.close(code=1008, reason="no active assignment")
             return
@@ -163,26 +168,37 @@ class PodAgent:
         connection_id = frame.get("connection_id", "")
         resume = bool(frame.get("resume", False))
         cursor = frame.get("cursor", {}) or {}
+        pod_token = frame.get("pod_token", self.token)
         log.info(
             "pod assigned session=%s connection=%s resume=%s",
             session_id,
             connection_id,
             resume,
         )
-        self._signal_bridge = SignalBridge()
-        turn_id = int(cursor.get("last_turn_id", 0)) + 1
-        pc_pod, pc_client = await run_loopback_proof(turn_id=turn_id)
-        self._assignments[session_id] = (pc_pod, pc_client)
-        log.info("captions loopback ok session=%s", session_id)
+        memory = MemoryClient(f"http://{self.memoryd_addr}", pod_token=pod_token)
+        stages, monitor = build_stages(self.mock_answers)
+        convo = Conversation(
+            session_id=session_id,
+            connection_id=connection_id,
+            pod_token=pod_token,
+            cursor=cursor,
+            memory=memory,
+            stages=stages,
+            monitor=monitor,
+        )
+        await convo.start()
+        self._conversation = convo
+        self._assignments[session_id] = convo
+        log.info("conversation ready session=%s", session_id)
 
     async def handle_revoke(self, frame: dict[str, Any]) -> None:
         session_id = frame.get("session_id", "")
-        if session_id in self._assignments:
-            pc_pod, pc_client = self._assignments.pop(session_id)
-            await pc_pod.close()
-            await pc_client.close()
+        convo = self._assignments.pop(session_id, None)
+        if convo is not None:
+            await convo.stop()
             log.info("assignment revoked session=%s", session_id)
-        self._signal_bridge = None
+        if self._conversation is convo:
+            self._conversation = None
 
     async def run(self) -> None:
         host, _, port = self.pod_addr.partition(":")
@@ -205,6 +221,17 @@ class PodAgent:
         finally:
             surface_task.cancel()
             await asyncio.gather(surface_task, return_exceptions=True)
+
+
+def _parse_mock_answers(raw: str | None) -> list[str]:
+    """VIHS_MOCK_ANSWERS: JSON array of per-turn scripted answers (mock LLM)."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        return list(parsed) if isinstance(parsed, list) else []
+    except ValueError:
+        return []
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -239,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
         token=args.token,
         cap=args.cap,
         real_stages=real_stages,
+        memoryd_addr=os.environ.get("VIHS_MEMORYD_ADDR", "127.0.0.1:8091"),
+        mock_answers=_parse_mock_answers(os.environ.get("VIHS_MOCK_ANSWERS")),
     )
 
     loop = asyncio.new_event_loop()
@@ -257,9 +286,8 @@ def main(argv: list[str] | None = None) -> int:
 
 async def _shutdown(agent: PodAgent) -> None:
     log.info("shutting down")
-    for pc_pod, pc_client in agent._assignments.values():
-        await pc_pod.close()
-        await pc_client.close()
+    for convo in list(agent._assignments.values()):
+        await convo.stop()
     agent._assignments.clear()
     asyncio.get_event_loop().stop()
 

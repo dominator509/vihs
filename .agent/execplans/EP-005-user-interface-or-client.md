@@ -174,7 +174,7 @@ reruns are exact.
 
 ## 12. Progress
 - [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [x] M4 agent
-- [ ] M5 client E2E  - [ ] M6 latency  - [ ] M7 real adapters
+- [x] M5 client E2E  - [ ] M6 latency  - [ ] M7 real adapters
 
 ## 13. Surprises & Discoveries
 ### M1-M3
@@ -213,6 +213,22 @@ reruns are exact.
 - numpy 2.5.1 stubs require mypy `python_version = "3.12"` (config was 3.11).
 - The long-running dev orchestrator binary was STALE (404 on
   /internal/pods/register); restart services from the current build.
+### M5
+- `registry.ready()` was wired in M4, but the FULL gate exposed a second
+  staleness class: a Ready pod whose assign WS had disconnected (15s reap
+  window) still satisfied `fill < cap` and won `pick()` — then the send
+  silently dropped the frame while the API returned 200. The e2e harness
+  only caught it when all three targets ran in sequence.
+- `resume` was derived from `meta.turns` (set 0 at create, never updated) —
+  resume ALWAYS false. memoryd's `last_turn_id` is the durable cursor and
+  `assign()` already loads it.
+- The e2e "convo" target-name mismatch (`"convo"` vs `"e2e_convo"`) made
+  `run_e2e.py` fall through to resume — which accidentally proved the
+  resume path worked before the resume target existed.
+- Mocks that ledger before playback completes double-report cancelled
+  chunks as played; the mux ledger also accumulated across turns. Both
+  masked barge-in correctness (INV-1) until the harness checked exact
+  committed text.
 
 ## 14. Decision Log
 - D1 (M1-M3): Keep `flow.py` as the task-graph module; re-export from
@@ -233,4 +249,20 @@ reruns are exact.
 - D8 (M4): M4's captions proof is an in-process two-PC loopback; the signal
   WS handler routes to the assignment's SignalBridge and is exercised by the
   browser client in M5.
+- D9 (M5): `assign()` derives `resume` from memoryd's durable `last_turn_id`
+  cursor, never from the orchestrator's local session cache (create-time
+  `turns:0` was never updated → resume always false).
+- D10 (M5): router `pick()` is liveness-aware — a Ready pod with a vanished
+  assign channel is excluded (stale registry entry); `assign()` re-checks
+  liveness before committing and returns no-capacity instead of a silent
+  200 with a frame that went nowhere.
+- D11 (M5): pod `MemoryClient` converted to async httpx — the sync client
+  was awaited inside the asyncio loop (runtime failure); event body matches
+  memoryd `v`/`session_id`/`ts` contract.
+- D12 (M5): mocks simulate on-wire playback duration; only COMPLETED
+  playback is ledgered; mux ledger resets per turn (barge-in must never
+  commit the previous turn's spans).
+- D13 (M5): conversation loop is task-based (response runs concurrently);
+  the awaited-loop version queued barge-in input until the full turn
+  finished — INV-1 could never fire.
 ## 15. Outcomes & Retrospective

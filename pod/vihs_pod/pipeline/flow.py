@@ -46,11 +46,13 @@ async def run_response(
     prompt: str,
     turn_id: int,
     ledger: dict[int, str],
+    on_caption: Any = None,  # Callable[[int, str], Awaitable[None]] — live deltas
 ) -> Committed:
     """Clause-pipelined response. Returns the committed turn.
 
     `ledger` maps clause_id → text so abort reconstruction can slice exact
-    spans (INV-1).
+    spans (INV-1). `on_caption(turn_id, delta)` is awaited per audio chunk
+    with the exact text that chunk covers — the live caption path (SPEC-004).
     """
     clauses: asyncio.Queue[Clause] = asyncio.Queue(maxsize=4)
     audio: asyncio.Queue[Tagged] = asyncio.Queue(maxsize=16)
@@ -81,6 +83,8 @@ async def run_response(
                     return
                 span = (start, start + ch.chars_covered)
                 start += ch.chars_covered
+                if on_caption is not None:
+                    await on_caption(turn_id, cl.text[span[0] : span[1]])
                 await audio.put(Tagged(chunk=ch, clause_id=cl.id, span=span))
         await audio.put(END)  # type: ignore[arg-type]
 

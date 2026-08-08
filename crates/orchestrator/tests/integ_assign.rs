@@ -75,7 +75,6 @@ async fn register_ready_assign_flow() {
         &st.pod_assign,
         "session-fake-1",
         "user-token",
-        false,
     )
     .await
     .expect("assign must succeed with a ready pod + live memoryd");
@@ -122,7 +121,6 @@ async fn hard_cap_blocks_second_assignment() {
         &st.pod_assign,
         "session-fake-2",
         "user-token",
-        false,
     )
     .await;
     assert!(

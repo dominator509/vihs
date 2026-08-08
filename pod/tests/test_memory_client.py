@@ -17,12 +17,12 @@ MEMORYD = os.environ.get("VIHS_MEMORYD_ADDR", "127.0.0.1:8091")
 
 
 @pytest.fixture
-def client() -> MemoryClient:
+async def client() -> MemoryClient:
     return MemoryClient(f"http://{MEMORYD}", pod_token="pod-test-token")
 
 
 @pytest.mark.integration
-def test_append_then_transcript(client: MemoryClient) -> None:
+async def test_append_then_transcript(client: MemoryClient) -> None:
     sid = f"pod-test-{uuid.uuid4().hex[:8]}"
     event = {
         "v": 1,
@@ -34,15 +34,15 @@ def test_append_then_transcript(client: MemoryClient) -> None:
         "text": "hello pod",
         "meta": {"interrupted": False},
     }
-    resp = client.append_event(sid, event)
+    resp = await client.append_event(sid, event)
     assert resp["status"] in ("committed", "duplicate")
     assert resp["hash"], "committed event carries a chain hash"
     assert resp["turn_id"] == 1
 
 
 @pytest.mark.integration
-def test_load_unknown_session_raises(client: MemoryClient) -> None:
+async def test_load_unknown_session_raises(client: MemoryClient) -> None:
     from httpx import HTTPStatusError
 
     with pytest.raises(HTTPStatusError):
-        client.load(f"nope-{uuid.uuid4().hex[:8]}")
+        await client.load(f"nope-{uuid.uuid4().hex[:8]}")

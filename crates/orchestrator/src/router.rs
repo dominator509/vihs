@@ -20,35 +20,50 @@ pub struct AssignOutcome {
     pub resume: bool,
 }
 
-/// Least-loaded Ready pod with fill < cap. Deterministic: ties by lowest
-/// pod_id (registry snapshot is already ordered).
-pub fn pick(registry: &PodRegistry, cap: u32) -> Option<PodState> {
+/// Least-loaded Ready pod with fill < cap AND a LIVE assign channel (the
+/// pod is only assignable while its assign WS is connected — a Ready state
+/// with a dead channel is a stale registry entry). Deterministic: ties by
+/// lowest pod_id (registry snapshot is already ordered).
+pub fn pick(
+    registry: &PodRegistry,
+    cap: u32,
+    channels: &crate::PodAssignChannels,
+) -> Option<PodState> {
     registry
         .snapshot()
         .into_iter()
         .filter(|p| p.state == PodPhase::Ready && p.fill < p.cap.min(cap))
+        .filter(|p| channels.senders.contains_key(p.id.as_str()))
         .min_by_key(|p| (p.fill, p.id.as_str().to_string()))
 }
 
 /// Full assignment: mint pod token + signed memory URL (via memoryd load),
 /// bump fill, cancel cooldown, push the SPEC-003 `assign` frame on the pod's
-/// internal WS. Returns the frames the internal WS needs.
+/// internal WS. `resume` is derived from the DURABLE cursor (memoryd's
+/// last_turn_id), never from the orchestrator's local session cache — the
+/// cache can be stale (created turns:0, updated only by pod appends).
 pub async fn assign(
     registry: &Arc<PodRegistry>,
     memoryd: &MemorydClient,
     assign_channels: &crate::PodAssignChannels,
     session_id: &str,
     user_token: &str,
-    resume: bool,
 ) -> Result<AssignOutcome, OrchError> {
-    let pod = pick(registry, u32::MAX)
+    let pod = pick(registry, u32::MAX, assign_channels)
         .ok_or_else(|| OrchError::NoCapacity("no ready pod with capacity".into()))?;
 
     // memoryd load gives the cursor + signed memory URL.
     let load = memoryd.load(session_id, user_token).await?;
+    let resume = load.last_turn_id > 0;
     let connection_id = uuid::Uuid::new_v4().to_string();
     let pod_token = crate::pod_token();
 
+    // Liveness re-check before committing the assignment: if the channel
+    // vanished between pick and send, return no-capacity (never a silent
+    // 200 with a frame that went nowhere).
+    if !assign_channels.senders.contains_key(pod.id.as_str()) {
+        return Err(OrchError::NoCapacity("pod lost its assign channel".into()));
+    }
     registry.assign(&pod.id);
 
     // Push the assign frame to the pod's internal WS (SPEC-003):
