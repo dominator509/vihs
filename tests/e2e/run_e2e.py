@@ -278,8 +278,9 @@ def _connect_session(session_id: str) -> str:
 class ClientPeer:
     """aiortc client through the orchestrator relay (acts as the browser)."""
 
-    def __init__(self, connection_id: str) -> None:
+    def __init__(self, connection_id: str, auth_frame: bool = False) -> None:
         self.connection_id = connection_id
+        self.auth_frame = auth_frame
         self.pc = RTCPeerConnection()
         self.captions: list[dict] = []
         self._captions_evt = asyncio.Event()
@@ -300,9 +301,16 @@ class ClientPeer:
         await self.pc.setLocalDescription(offer)
         await wait_gathering_complete(self.pc)
         self.ws = await asyncio.wait_for(
-            websockets_connect(f"ws://{ORCH_ADDR}/v1/signal/{self.connection_id}"),
+            websockets_connect(
+                f"ws://{ORCH_ADDR}/v1/signal/{self.connection_id}",
+                auth_frame=self.auth_frame,
+            ),
             timeout,
         )
+        if self.auth_frame:
+            # Browser path (EP-006 M5): FIRST message is the SPEC-005 auth
+            # frame — the WebSocket API cannot send headers.
+            await self.ws.send(json.dumps({"t": "auth", "token": USER_TOKEN}))
         first = json.loads(await asyncio.wait_for(self.ws.recv(), timeout))
         if first.get("t") != "state":
             raise RuntimeError(f"expected state frame, got {first}")
@@ -342,9 +350,13 @@ class ClientPeer:
         await self.pc.close()
 
 
-def websockets_connect(url: str):
+def websockets_connect(url: str, auth_frame: bool = False):
     import websockets
 
+    if auth_frame:
+        # Browser path (EP-006 M5): the WebSocket API cannot set headers, so
+        # the FIRST message must be the SPEC-005 auth frame. No header at all.
+        return websockets.connect(url, max_size=64 * 1024)
     return websockets.connect(
         url, additional_headers={"Authorization": f"Bearer {USER_TOKEN}"}, max_size=64 * 1024
     )
@@ -390,7 +402,7 @@ def e2e_connect() -> None:
         stop_processes(owned)
 
 
-async def _run_convo_target(target: str) -> None:
+async def _run_convo_target(target: str, auth_frame: bool = False) -> None:
     owned = ensure_services()
     pod_proc: subprocess.Popen | None = None
     session_id: str | None = None
@@ -412,10 +424,13 @@ async def _run_convo_target(target: str) -> None:
             raise RuntimeError("pod conversation not ready")
         print(f"  session {session_id[:8]}… connected; pod conversation ready")
 
-        peer = ClientPeer(connection_id)
+        peer = ClientPeer(connection_id, auth_frame=auth_frame)
         try:
             await peer.connect()
-            print("  client WebRTC connected through relay (captions + user_input open)")
+            print(
+                "  client WebRTC connected through relay (captions + user_input open)"
+                + (" via auth FRAME" if auth_frame else " via header")
+            )
 
             if target == "e2e_convo":
                 await _drive_convo(peer, pod_proc, log_path, session_id)
@@ -520,7 +535,12 @@ async def _drive_resume(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: 
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv or sys.argv[1:] or ["e2e_connect", "e2e_convo", "e2e_resume"]
+    args = argv or sys.argv[1:] or [
+        "e2e_connect",
+        "e2e_convo",
+        "e2e_resume",
+        "e2e_authframe",
+    ]
     targets: list[str] = []
     i = 0
     while i < len(args):
@@ -544,6 +564,12 @@ def main(argv: list[str] | None = None) -> int:
                     e2e_connect()
                 elif target in ("e2e_convo", "e2e_resume"):
                     asyncio.run(_run_convo_target(target))
+                elif target == "e2e_authframe":
+                    # Browser-compatible auth path (EP-006 M5): the signal WS
+                    # carries NO Authorization header — the token arrives as
+                    # the SPEC-005 first-message auth frame. Full convo proof.
+                    asyncio.run(_run_convo_target("e2e_convo", auth_frame=True))
+                    print("e2e_authframe OK")
                 else:
                     print(f"unknown e2e target: {target}", file=sys.stderr)
                     return 2

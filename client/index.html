@@ -3,14 +3,89 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VIHS</title>
-  <!-- EP-001 placeholder page. Real WebRTC client lands in EP-005. -->
-  <style>body{font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0;background:#0f1115;color:#e8e8e8}main{text-align:center}</style>
+  <title>VIHS — Virtual Interactive Human System</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif; margin: 0; min-height: 100vh;
+      background: #0f1115; color: #e8e8e8; display: grid; place-items: center;
+    }
+    main { width: min(640px, 92vw); padding: 2rem 0; }
+    h1 { font-size: 1.4rem; margin: 0 0 0.25rem; }
+    .sub { color: #9aa; margin-bottom: 1.5rem; font-size: 0.9rem; }
+    .card {
+      background: #171a21; border: 1px solid #262b36; border-radius: 12px;
+      padding: 1.25rem; margin-bottom: 1rem;
+    }
+    label { display: block; margin: 0.75rem 0 0.25rem; font-size: 0.85rem; color: #b8c0cc; }
+    input[type=text], input[type=password], select {
+      width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #2e3440;
+      background: #0f1115; color: #e8e8e8; font-size: 1rem;
+    }
+    button {
+      margin-top: 1rem; padding: 0.6rem 1.25rem; border-radius: 8px; border: none;
+      background: #3b82f6; color: #fff; font-size: 1rem; cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.danger { background: #b91c1c; }
+    .remember { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.9rem; }
+    .remember input { width: auto; }
+    #status { font-size: 0.9rem; color: #8fb; min-height: 1.2em; }
+    #status.error { color: #f88; }
+    #stage { min-height: 120px; border: 1px dashed #2e3440; border-radius: 8px;
+      display: grid; place-items: center; color: #667; font-size: 0.9rem; padding: 1rem; }
+    #captions { min-height: 3em; white-space: pre-wrap; font-size: 1rem; color: #cfe; }
+    ul#sessions { list-style: none; padding: 0; margin: 0.5rem 0 0; }
+    ul#sessions li {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0.5rem 0.25rem; border-bottom: 1px solid #22272f; gap: 0.5rem;
+    }
+    ul#sessions li button { margin: 0; padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+    .muted { color: #667; font-size: 0.8rem; }
+  </style>
 </head>
 <body>
   <main>
     <h1>VIHS</h1>
-    <p>Virtual Interaction Hosting Suite — client placeholder (EP-005 will replace).</p>
+    <p class="sub">Virtual Interactive Human System — talk to your avatar.</p>
+
+    <!-- F1: token prompt (SPEC-004 F1). Stored in memory ONLY unless the
+         "remember on this device" opt-in is checked (SPEC-004 security). -->
+    <section class="card" id="token-prompt">
+      <label for="token-input">Operator-issued token</label>
+      <input type="password" id="token-input" autocomplete="off" placeholder="paste your token" />
+      <label class="remember">
+        <input type="checkbox" id="remember-token" />
+        Remember on this device (stores the token in localStorage)
+      </label>
+      <button id="token-submit">Continue</button>
+      <div id="token-error" class="muted" style="color:#f88; min-height:1em; margin-top:0.5rem;"></div>
+    </section>
+
+    <section class="card" id="connect-panel" hidden>
+      <label for="persona-select">Persona</label>
+      <select id="persona-select">
+        <option value="e2e">Default</option>
+      </select>
+      <button id="connect-btn">Connect</button>
+      <button id="disconnect-btn" class="danger" hidden>End session</button>
+      <div id="status"></div>
+    </section>
+
+    <section class="card">
+      <label>Stage</label>
+      <div id="stage">Connect to begin</div>
+      <label>Captions</label>
+      <div id="captions"></div>
+    </section>
+
+    <section class="card">
+      <label>Your sessions</label>
+      <button id="refresh-sessions">Refresh</button>
+      <ul id="sessions"><li class="muted">No sessions yet</li></ul>
+    </section>
   </main>
+  <script src="/session.js"></script>
 </body>
 </html>

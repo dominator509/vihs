@@ -47,6 +47,7 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_MOCK_ANSWERS | no | dev | ["...","..."] | N | scripted mock-LLM answers per turn (E2E) | JSON array of strings |
 | TURN_URL / TURN_USER / TURN_PASS | no | stage,prod | turn:host:3478 | S(creds) | coturn relay | set together |
 | RUST_LOG / VIHS_POD_LOG | no | all | info | N | log levels | valid filter |
+| VIHS_CLIENT_DIR | no | dev | client/ | N | serve client HTML/JS from this dir instead of the embedded copy (EP-006 M5 dev override) | dir containing index.html + session.js |
 
 Unknown-at-generation vars: none blocking; RUNPOD_API_KEY is STOP S1 only at
 EP-009 real-deploy time (mock provider covers everything earlier).

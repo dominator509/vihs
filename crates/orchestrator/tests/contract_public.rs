@@ -412,7 +412,7 @@ async fn drain_unknown_pod_404() {
 
 #[tokio::test]
 async fn static_client_served_at_root() {
-    let html = client_static::index_html();
+    let html = client_static::index_html(None);
     assert!(html.contains("VIHS"), "placeholder must mention VIHS");
     assert!(html.contains("</html>"));
 }

@@ -70,7 +70,37 @@ Token tests namespace token_ids; revocation tests clean up. Re-runnable.
 
 ## 12. Progress
 - [x] M1 tokens  - [x] M2 orch matrix  - [x] M3 memoryd/pod scope
-- [x] M4 limits+redaction  - [ ] M5 client+e2e
+- [x] M4 limits+redaction  - [x] M5 client+e2e
+
+M5 notes (validation `sh scripts/test-e2e.sh` = E2E OK, 4 targets incl. the
+new browser auth-frame target; workspace 140 green; clippy 0; fmt clean;
+VERIFY OK):
+- NEW client F1 token handling (SPEC-004 F1; EP-006 §6): `client/index.html`
+  (token prompt with memory-only default + "remember on this device" opt-in,
+  persona select, connect panel, stage, captions, session list/delete) +
+  `client/session.js` (tokenStore: module memory only; localStorage ONLY in
+  the explicit opt-in remember()/clear()/loadRemembered() paths; captions
+  rendered via textContent, never innerHTML; first-message auth frame on the
+  signal WS; persona select → create/resume → connect).
+- Server: FIRST-MESSAGE AUTH FRAME on the signal WS (SPEC-005: "header or
+  first-message auth frame, never query string"). Browsers cannot set WS
+  headers, so `signal_socket` accepts a missing header and `handle_signal`
+  awaits `{"t":"auth","token":...}` as the first client frame, authz's it
+  BEFORE the relay starts, and consumes it (never forwarded to the pod).
+  Header auth (pod/harness) unchanged. Pure `parse_auth_frame` + 4 unit
+  tests; SPEC-003 signaling table updated (L2 spec-update).
+- Client serving: `client_static.rs` now EMBEDS the real client
+  (include_str! client/index.html + session.js) and serves `/` + `/session.js`
+  with `VIHS_CLIENT_DIR` dev override (config.client_dir was read but never
+  wired — now live; ENVIRONMENT.md + .env.example rows added).
+- E2E: new `e2e_authframe` target — ClientPeer connects with NO header and
+  sends the auth frame as its first WS message; full 3-turn barge-in convo
+  proves the browser-compatible path with a real minted token. Added to the
+  DEFAULT target set so verify.sh exercises it every run.
+- Tests: `crates/orchestrator/tests/client_contract.rs` (6 — routes serve the
+  REAL client, F1 memory-only invariant, auth-frame path present, no token in
+  query strings, captions textContent-only, F1 regions present);
+  signal_route auth_frame unit tests (4).
 
 M4 notes (validation `sh scripts/security-check.sh` = SECURITY OK; workspace
 130 green; clippy 0; fmt clean; VERIFY OK — preflight/lint/format/typecheck/
@@ -178,6 +208,28 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   3-target E2E gate GREEN.
 
 ## 13. Surprises & Discoveries
+- M5: browsers CANNOT set WebSocket headers — the WebSocket API simply has
+  no header parameter. SPEC-005 explicitly sanctions the alternative
+  ("header or first-message auth frame"), and the browser client NEEDS it:
+  the server's header-only signal auth was a real gap for the client, not a
+  spec ambiguity. The auth frame is consumed before the relay starts and is
+  never forwarded pod-ward.
+- M5: `config.client_dir` (VIHS_CLIENT_DIR) was READ by Config::from_env
+  since EP-005 but NEVER wired into the static serving — the placeholder
+  was served unconditionally. M5 wired it as the dev override with the
+  embedded client as the default.
+- M5: the F1 client contract tests initially asserted on WORDS in comments
+  ("localStorage", "innerHTML" appear in doc comments as prose) and failed
+  against correct code. Tightened to assert on API CALLS (localStorage.*
+  outside tokenStore, `innerHTML =` assignments) — the invariant is
+  behavior, not vocabulary.
+- M5: `include_str!` paths are relative to the SOURCE file — from
+  `crates/orchestrator/src/` the client is `../../../client/` (three up),
+  not two; the first build failed with "couldn't read".
+- Pre-existing (M3, still open): dependency-audit.sh swallows cargo-audit's
+  non-zero exit — 3 rustls-webpki RUSTSECs via aws-smithy printed but never
+  fail the gate. aws-sdk upgrade deferred. Not M5-introduced.
+
 - M4: the security-check.sh redaction gate was silently SKIPping — it runs
   `cargo test --workspace redaction` (FILTER BY TEST NAME), and M1–M3 added
   no test whose name contains "redaction". M4's tests are named
@@ -255,6 +307,26 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   delete per COMMANDS.md).
 
 ## 14. Decision Log
+- M5: the browser client authenticates the signal WS via FIRST-MESSAGE AUTH
+  FRAME, not a header. Evidence: the WebSocket API cannot set headers, and
+  SPEC-005 explicitly allows "header or first-message auth frame, never
+  query string". The frame is consumed before the relay starts so it never
+  reaches the pod; header auth (pod/harness) is unchanged. This is the only
+  browser-compatible auth path.
+- M5: the client is EMBEDDED in the orchestrator binary (include_str!) with
+  VIHS_CLIENT_DIR as a dev override. Evidence: the release binary must serve
+  a complete client with no external files (deploy docs assume a single
+  artifact); the config already read client_dir but never used it. No build
+  step added — plain browser JS, no Node (AGENTS §8).
+- M5: e2e_authframe joined the DEFAULT E2E target set. Evidence: an auth
+  path proven once by a manual run is not a gate; verify.sh must exercise
+  the browser-compatible path on every run or the next refactor silently
+  breaks it (same class as #47/#32).
+- M5 files beyond §6 (AGENTS §5): client/index.html (F1 page), SPEC-003
+  signaling table row (L2 spec-update for the auth frame), ENVIRONMENT.md +
+  .env.example rows (VIHS_CLIENT_DIR was already in config — the docs row is
+  the AGENTS §11 requirement). client_static.rs/signal_route.rs are the
+  serve/auth seams §6 names. All M5-necessary.
 - M4: rate limiting is in-memory (fixed-window per token_id), not Redis.
   Evidence: the orchestrator is a single process (dev + EP-009 target), and
   SPEC-005 A5 names per-token limits without a shared-storage requirement.
@@ -329,3 +401,40 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   all M1-necessary, not scope drift.
 
 ## 15. Outcomes & Retrospective
+EP-006 COMPLETE. All five milestones passed their documented validation
+commands with real evidence:
+- M1 `cargo test --workspace` (94→token store) — mint/verify/seed/revoke,
+  argon2id+pepper, env-seeded bootstrap.
+- M2 `cargo test -p orchestrator --test authz_matrix` (3) — every
+  session-scoped SPEC-003 route covered owner/foreign/none; WS upgrades
+  authz'd.
+- M3 `cargo test -p memoryd authz` (10) — shared vihs-auth store, real
+  session-bound pod tokens (≤15 min), strict memoryd authorizer.
+- M4 `sh scripts/security-check.sh` (SECURITY OK) — rate limits
+  (create/resume/signal per SPEC-005 A5), audit lines (ids only), redaction
+  middleware on both services; 7 redaction tests now run inside the gate.
+- M5 `sh scripts/test-e2e.sh` (E2E OK, 4 targets) — F1 client with
+  memory-only token handling + opt-in, first-message auth frame for
+  browsers, embedded client serving, browser-compatible E2E target.
+
+Final state: workspace 140 tests green (incl. 4 auth-frame + 6 client
+contract), pod 60 green, mcpd 12 green, clippy 0, fmt clean, VERIFY OK end
+to end (preflight/lint/format/typecheck/unit/integration/e2e-4-target/
+build/security/dependency-audit/smoke). SPEC-005 A1–A8 acceptance criteria
+all have implemented, tested controls:
+- A1 owner/pod scope on every session route — matrix + authz tests.
+- A2 resume ownership-gated — owner check + foreign 404 tests.
+- A3 pod tokens per assignment, ≤15 min, signed URLs same TTL — router mint +
+  memoryd authz + X-Amz-Expires=900 test.
+- A4 foreign probes 404 no-oracle — matrix foreign case.
+- A5 rate limits per token → 429 retryable — ratelimit unit + integration.
+- A6 admin scope only — user-token rejection tests.
+- A7 hard delete owner/admin + audited ids-only — delete authz + audit lines.
+- A8 revocation immediate — revoke test.
+
+Remaining risks (logged, not blocking): dependency-audit.sh swallows the
+cargo-audit non-zero exit — 3 rustls-webpki RUSTSECs via aws-smithy are
+printed but never fail the gate; fix = aws-sdk upgrade (dependency swap,
+needs its own decision). Client F2–F7 media polish remains EP-005's
+non-gated skin leftover (F1 + auth path are M5's scope and are complete).
+Next: EP-007 (chaos + loadtest) per ROADMAP order.

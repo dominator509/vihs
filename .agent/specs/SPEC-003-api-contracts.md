@@ -34,6 +34,11 @@ Static client served at `/` (embedded).
 ## Signaling WebSocket `wss://…/v1/signal/{connection_id}` (same bearer)
 Messages (client↔orchestrator↔pod relay; ≤16 KiB each; strict schema):
 ```json
+c→s {"t":"auth","token":"..."}        // FIRST message only, browser path (SPEC-005:
+                                       // "header or first-message auth frame, never
+                                       // query string"). Consumed by the orchestrator,
+                                       // never forwarded to the pod. Headered clients
+                                       // (pod/harness) skip it.
 c→s {"t":"offer","sdp":"..."}          s→c {"t":"answer","sdp":"..."}
 c↔s {"t":"ice","candidate":{...}}
 s→c {"t":"state","v":"queued|assigning|cold_start|connected|reconnect"}
