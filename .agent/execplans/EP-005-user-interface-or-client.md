@@ -311,3 +311,34 @@ reruns are exact.
   RMS energy gate until EP-009 staging (weights path is an S1 credential
   stop), documented in the module.
 ## 15. Outcomes & Retrospective
+EP-005 DONE — all 7 milestones validated:
+
+- M1–M3: TurnFSM + ClauseChunker + AbortBus + INV-1 ledger math (27 tests),
+  byte-frozen context assembly (INV-4), clause-pipelined `run_response`.
+- M4: agent bootstrap (register/health/assign WS), aiortc 1.15 loopback
+  proof, captions channel, `e2e_connect`.
+- M5: `e2e_convo` (scripted + barge-in, INV-1 exact) + `e2e_resume`
+  (memoryd cursor-derived) — the full 3-target E2E gate.
+- M6: latency harness with budget-midpoint mocks, pipeline-overhead
+  assertion (e2e ≤ sum + 150 ms), percentile report.
+- M7: real adapters behind `PROVIDER` — ADR-012 axiom-gateway LLM
+  (matched to the live AXIOM routes.ts contract), vLLM, faster-whisper,
+  Piper, Silero VAD gate, stub lip-sync, GStreamer mux (ledger-only in CI).
+
+Validation evidence: `sh scripts/test-e2e.sh` → `E2E OK` (3 targets);
+pod: 60 tests green, ruff clean, mypy strict clean (23 files);
+Rust workspace: 88 tests green, clippy clean, fmt clean.
+
+Acceptance (SPEC-001 + SPEC-004 with mocks): a scripted E2E conversation
+with interruption and resume runs green on a laptop with zero GPUs —
+the plan's §1 vertical slice is real.
+
+Decisions: D1–D19 in §14. Remaining risks:
+- Real GPU/media stages (faster-whisper weights, Piper binary, Silero ONNX,
+  GStreamer appsrc graph) are staged at EP-009 — the adapter contracts are
+  proven by faked transports, not live hardware.
+- The static browser client (`client/` beyond the placeholder index.html)
+  is the remaining SPEC-004 surface; the E2E harness drives F1–F5 headless
+  per SPEC-004, and the client UI polish rides with EP-006/EP-009.
+- `run_response` metrics hooks are in place; dashboard/export of the
+  latency report is EP-008 (observability) scope.
