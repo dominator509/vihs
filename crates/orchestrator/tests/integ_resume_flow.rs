@@ -24,12 +24,24 @@ use orchestrator::{build_state, AppState};
 use serde_json::{json, Value};
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-fn orch_state() -> Arc<AppState> {
+async fn orch_state() -> Arc<AppState> {
     let mut cfg = OrchConfig::from_env();
     cfg.provider = "mock".to_string();
     cfg.warm_pool_floor = 1;
     let mem = MemorydClient::new(&cfg.memoryd_addr);
-    build_state(cfg, mem)
+    build_state(cfg, mem).await
+}
+
+/// Mint a real user token via the store (EP-006 M1) for HTTP flows.
+async fn mint_user(st: &Arc<AppState>, owner: &str) -> String {
+    st.tokens
+        .mint(
+            owner,
+            orchestrator::authz::Scope::User,
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .expect("mint user token")
 }
 
 fn app(st: Arc<AppState>) -> Router {
@@ -156,7 +168,8 @@ async fn http_json(
 
 #[tokio::test]
 async fn fresh_session_full_flow() {
-    let st = orch_state();
+    let st = orch_state().await;
+    let user_tok = mint_user(&st, "owner-flow").await;
     let app = app(st.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -174,7 +187,7 @@ async fn fresh_session_full_flow() {
         &base,
         "POST",
         "/v1/sessions",
-        "tok-user",
+        &user_tok,
         Some(json!({"persona_id": "persona-a"})),
     )
     .await;
@@ -186,7 +199,7 @@ async fn fresh_session_full_flow() {
         &base,
         "POST",
         &format!("/v1/sessions/{sid}/connect"),
-        "tok-user",
+        &user_tok,
         None,
     )
     .await;
@@ -211,7 +224,7 @@ async fn fresh_session_full_flow() {
     let mut req = ws_url.into_client_request().unwrap();
     req.headers_mut().insert(
         axum::http::header::AUTHORIZATION,
-        "Bearer tok-user".parse().unwrap(),
+        format!("Bearer {user_tok}").parse().unwrap(),
     );
     let (mut ws, _) = tokio_tungstenite::connect_async(req)
         .await
@@ -251,7 +264,8 @@ async fn fresh_session_full_flow() {
 
 #[tokio::test]
 async fn cap_enforcement_queues_second_connect() {
-    let st = orch_state();
+    let st = orch_state().await;
+    let user_tok = mint_user(&st, "owner-cap").await;
     let app = app(st.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -277,7 +291,7 @@ async fn cap_enforcement_queues_second_connect() {
         &base,
         "POST",
         "/v1/sessions",
-        "tok-user",
+        &user_tok,
         Some(json!({"persona_id": "persona-a"})),
     )
     .await;
@@ -289,7 +303,7 @@ async fn cap_enforcement_queues_second_connect() {
         &base,
         "POST",
         &format!("/v1/sessions/{sid}/connect"),
-        "tok-user",
+        &user_tok,
         None,
     )
     .await;
@@ -301,7 +315,7 @@ async fn cap_enforcement_queues_second_connect() {
         &base,
         "POST",
         &format!("/v1/sessions/{sid}/connect"),
-        "tok-user",
+        &user_tok,
         None,
     )
     .await;

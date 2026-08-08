@@ -27,7 +27,7 @@ fn bearer(headers: &HeaderMap) -> Option<String> {
 /// GET /admin/pods — registry rows: id, addr, state, fill/cap, ping age.
 async fn pods(State(st): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let p = st.authz.allow(&token, Verb::Admin)?;
+    let p = st.authz.allow(&token, Verb::Admin).await?;
     if p.scope != Scope::Admin {
         return Err(OrchError::Authz("admin scope required".into()));
     }
@@ -63,7 +63,7 @@ async fn drain_pod(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let p = st.authz.allow(&token, Verb::Admin)?;
+    let p = st.authz.allow(&token, Verb::Admin).await?;
     if p.scope != Scope::Admin {
         return Err(OrchError::Authz("admin scope required".into()));
     }
@@ -78,7 +78,7 @@ async fn drain_pod(
 /// GET /admin/scale — autoscaler state.
 async fn scale(State(st): State<Arc<AppState>>, headers: HeaderMap) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let p = st.authz.allow(&token, Verb::Admin)?;
+    let p = st.authz.allow(&token, Verb::Admin).await?;
     if p.scope != Scope::Admin {
         return Err(OrchError::Authz("admin scope required".into()));
     }
@@ -101,22 +101,27 @@ struct MintBody {
     scope: String,
 }
 
-/// POST /admin/tokens — mint a user/admin token (shown once; EP-006 hardens).
+/// POST /admin/tokens — mint a user/admin token via the Redis token store
+/// (SPEC-005 model; shown once). Admin-only; user tokens rejected (A6).
 async fn mint_token(
     State(st): State<Arc<AppState>>,
     headers: HeaderMap,
     Json(body): Json<MintBody>,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let p = st.authz.allow(&token, Verb::Admin)?;
+    let p = st.authz.allow(&token, Verb::Admin).await?;
     if p.scope != Scope::Admin {
         return Err(OrchError::Authz("admin scope required".into()));
     }
-    let minted = uuid::Uuid::new_v4().to_string();
-    st.minted_tokens.lock().await.insert(
-        minted.clone(),
-        json!({"owner_id": body.owner_id, "scope": body.scope}),
-    );
+    let scope = match body.scope.as_str() {
+        "admin" => crate::authz::Scope::Admin,
+        "user" => crate::authz::Scope::User,
+        other => return Err(OrchError::Invalid(format!("unknown scope {other}"))),
+    };
+    let minted = st
+        .tokens
+        .mint(&body.owner_id, scope, crate::tokens::DEFAULT_TOKEN_TTL)
+        .await?;
     Ok(Json(json!({ "token": minted })).into_response())
 }
 

@@ -19,12 +19,12 @@ use orchestrator::{build_state, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-fn orch_state() -> Arc<AppState> {
+async fn orch_state() -> Arc<AppState> {
     let mut cfg = OrchConfig::from_env();
     cfg.provider = "mock".to_string();
     cfg.warm_pool_floor = 1;
     let mem = MemorydClient::new(&cfg.memoryd_addr);
-    build_state(cfg, mem)
+    build_state(cfg, mem).await
 }
 
 fn orch_app(st: Arc<AppState>) -> Router {
@@ -61,26 +61,45 @@ fn bearer(tok: &str) -> HeaderMap {
     h
 }
 
-async fn spawn_orchestrator() -> String {
-    let st = orch_state();
-    let app = orch_app(st);
+async fn spawn_orchestrator() -> (String, Arc<AppState>) {
+    let st = orch_state().await;
+    let app = orch_app(st.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve orch");
     });
-    format!("http://{addr}")
+    (format!("http://{addr}"), st)
 }
 
-async fn setup() -> (Arc<McpdState>, String) {
-    let orch_base = spawn_orchestrator().await;
+/// Start the orchestrator + mcpd and mint real user/admin tokens (EP-006 M1).
+async fn setup() -> (Arc<McpdState>, String, String, String) {
+    let (orch_base, st) = spawn_orchestrator().await;
+    let user_tok = st
+        .tokens
+        .mint(
+            "owner-mcp",
+            orchestrator::authz::Scope::User,
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .expect("mint user");
+    let admin_tok = st
+        .tokens
+        .mint(
+            "root-mcp",
+            orchestrator::authz::Scope::Admin,
+            std::time::Duration::from_secs(3600),
+        )
+        .await
+        .expect("mint admin");
     let state = make_state(orch_base.clone());
-    (state, orch_base)
+    (state, orch_base, user_tok, admin_tok)
 }
 
 #[tokio::test]
 async fn initialize_returns_protocol_capabilities() {
-    let (state, _) = setup().await;
+    let (state, _, _, _) = setup().await;
     let resp = rpc(
         state,
         HeaderMap::new(),
@@ -96,7 +115,7 @@ async fn initialize_returns_protocol_capabilities() {
 
 #[tokio::test]
 async fn tools_list_has_nine_vihs_tools() {
-    let (state, _) = setup().await;
+    let (state, _, _, _) = setup().await;
     let resp = rpc(
         state,
         HeaderMap::new(),
@@ -130,7 +149,7 @@ async fn tools_list_has_nine_vihs_tools() {
 
 #[tokio::test]
 async fn unknown_tool_returns_jsonrpc_error() {
-    let (state, _) = setup().await;
+    let (state, _, _, _) = setup().await;
     let resp = rpc(
         state,
         HeaderMap::new(),
@@ -143,7 +162,7 @@ async fn unknown_tool_returns_jsonrpc_error() {
 
 #[tokio::test]
 async fn unknown_method_returns_error() {
-    let (state, _) = setup().await;
+    let (state, _, _, _) = setup().await;
     let resp = rpc(
         state,
         HeaderMap::new(),
@@ -155,10 +174,10 @@ async fn unknown_method_returns_error() {
 
 #[tokio::test]
 async fn session_create_tool_mirrors_route_contract() {
-    let (state, _) = setup().await;
+    let (state, _, user_tok, _) = setup().await;
     let resp = rpc(
         state,
-        bearer("tok-mcp"),
+        bearer(&user_tok),
         json!({"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"vihs_session_create","arguments":{"persona_id":"persona-mcp"}}}),
     )
     .await;
@@ -171,10 +190,10 @@ async fn session_create_tool_mirrors_route_contract() {
 
 #[tokio::test]
 async fn session_create_missing_arg_is_error() {
-    let (state, _) = setup().await;
+    let (state, _, user_tok, _) = setup().await;
     let resp = rpc(
         state,
-        bearer("tok-mcp"),
+        bearer(&user_tok),
         json!({"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"vihs_session_create","arguments":{}}}),
     )
     .await;
@@ -183,10 +202,10 @@ async fn session_create_missing_arg_is_error() {
 
 #[tokio::test]
 async fn session_resume_unknown_404_surfaces_is_error() {
-    let (state, _) = setup().await;
+    let (state, _, user_tok, _) = setup().await;
     let resp = rpc(
         state,
-        bearer("tok-mcp"),
+        bearer(&user_tok),
         json!({"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"vihs_session_resume","arguments":{"session_id":"ghost-session"}}}),
     )
     .await;
@@ -199,10 +218,10 @@ async fn session_resume_unknown_404_surfaces_is_error() {
 
 #[tokio::test]
 async fn session_list_tool_contract() {
-    let (state, _) = setup().await;
+    let (state, _, user_tok, _) = setup().await;
     let resp = rpc(
         state,
-        bearer("tok-mcp"),
+        bearer(&user_tok),
         json!({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"vihs_session_list","arguments":{}}}),
     )
     .await;
@@ -214,10 +233,10 @@ async fn session_list_tool_contract() {
 
 #[tokio::test]
 async fn pods_list_tool_contract() {
-    let (state, _) = setup().await;
+    let (state, _, _, admin_tok) = setup().await;
     let resp = rpc(
         state,
-        bearer("admin-mcp"),
+        bearer(&admin_tok),
         json!({"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"vihs_pods_list","arguments":{}}}),
     )
     .await;
@@ -229,10 +248,10 @@ async fn pods_list_tool_contract() {
 
 #[tokio::test]
 async fn scale_status_tool_contract() {
-    let (state, _) = setup().await;
+    let (state, _, _, admin_tok) = setup().await;
     let resp = rpc(
         state,
-        bearer("admin-mcp"),
+        bearer(&admin_tok),
         json!({"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"vihs_scale_status","arguments":{}}}),
     )
     .await;
@@ -246,10 +265,10 @@ async fn scale_status_tool_contract() {
 
 #[tokio::test]
 async fn token_mint_tool_contract() {
-    let (state, _) = setup().await;
+    let (state, _, _, admin_tok) = setup().await;
     let resp = rpc(
         state,
-        bearer("admin-mcp"),
+        bearer(&admin_tok),
         json!({"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"vihs_token_mint","arguments":{"owner_id":"owner-mcp","scope":"user"}}}),
     )
     .await;
@@ -261,7 +280,7 @@ async fn token_mint_tool_contract() {
 
 #[tokio::test]
 async fn pod_drain_tool_contract() {
-    let (state, _) = setup().await;
+    let (state, _, _, admin_tok) = setup().await;
     // Register a pod first so drain has a target.
     let _ = rpc(
         state.clone(),
@@ -272,7 +291,7 @@ async fn pod_drain_tool_contract() {
     // Drain an unknown pod → isError true (route 404).
     let resp = rpc(
         state,
-        bearer("admin-mcp"),
+        bearer(&admin_tok),
         json!({"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"vihs_pod_drain","arguments":{"pod_id":"ghost-pod"}}}),
     )
     .await;

@@ -20,6 +20,7 @@ pub mod scaler;
 pub mod session_index;
 pub mod signal;
 pub mod signal_route;
+pub mod tokens;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -28,7 +29,7 @@ use dashmap::DashMap;
 use serde_json::Value;
 use tokio::sync::{mpsc, Mutex};
 
-use crate::authz::{Authorizer, PermissiveAuthorizer};
+use crate::authz::{Authorizer, TokenAuthorizer};
 use crate::config::Config;
 use crate::memoryd_client::MemorydClient;
 use crate::provider::{PodId, PodProvider};
@@ -37,6 +38,7 @@ use crate::queue::SessionQueue;
 use crate::registry::PodRegistry;
 use crate::session_index::SessionIndex;
 use crate::signal::RelayHandle;
+use crate::tokens::TokenStore;
 
 pub struct AppState {
     pub cfg: Config,
@@ -49,6 +51,7 @@ pub struct AppState {
     /// pod_id → internal assign-channel sender (assign WS; SPEC-003 frames).
     pub pod_assign: Arc<PodAssignChannels>,
     pub authz: Box<dyn Authorizer>,
+    pub tokens: TokenStore,
     pub minted_tokens: Arc<Mutex<BTreeMap<String, Value>>>,
     pub last_scale_decisions: Arc<Mutex<Vec<Value>>>,
 }
@@ -66,7 +69,7 @@ impl PodAssignChannels {
     }
 }
 
-pub fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
+pub async fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
     let provider: Arc<dyn PodProvider> = match cfg.provider.as_str() {
         "mock" => MockProvider::new(),
         other => {
@@ -74,6 +77,52 @@ pub fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
             MockProvider::new()
         }
     };
+
+    // Token store: pepper from env; dev generates ephemeral with a loud log
+    // (EP-006 §9 — stage/prod MUST set VIHS_TOKEN_PEPPER).
+    let pepper = std::env::var("VIHS_TOKEN_PEPPER").unwrap_or_else(|_| {
+        tracing::warn!(
+            "VIHS_TOKEN_PEPPER unset — generating EPHEMERAL dev pepper; tokens will not survive restart"
+        );
+        uuid::Uuid::new_v4().to_string()
+    });
+    let tokens = TokenStore::connect(&cfg.redis_url, pepper)
+        .await
+        .expect("token store connect");
+
+    // Seed env-provided credentials (EP-006 M1): the pod token (pod scope)
+    // and an optional bootstrap admin token (admin scope) so the admin mint
+    // route is reachable. Both must be 32-byte base64url strings — the store
+    // rejects anything else loudly.
+    let seed_ttl = std::time::Duration::from_secs(24 * 60 * 60);
+    if let Ok(pod_tok) = std::env::var("VIHS_POD_TOKEN") {
+        if !pod_tok.is_empty() {
+            match tokens
+                .seed(&pod_tok, "pod", crate::authz::Scope::Pod, seed_ttl)
+                .await
+            {
+                Ok(()) => tracing::info!("seeded VIHS_POD_TOKEN (pod scope)"),
+                Err(e) => tracing::error!("VIHS_POD_TOKEN not seeded: {e}"),
+            }
+        }
+    }
+    if let Ok(admin_tok) = std::env::var("VIHS_ADMIN_TOKEN") {
+        if !admin_tok.is_empty() {
+            match tokens
+                .seed(
+                    &admin_tok,
+                    "bootstrap",
+                    crate::authz::Scope::Admin,
+                    seed_ttl,
+                )
+                .await
+            {
+                Ok(()) => tracing::info!("seeded VIHS_ADMIN_TOKEN (admin scope)"),
+                Err(e) => tracing::error!("VIHS_ADMIN_TOKEN not seeded: {e}"),
+            }
+        }
+    }
+
     Arc::new(AppState {
         cfg,
         memoryd,
@@ -83,7 +132,8 @@ pub fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
         queue: SessionQueue::new(),
         relay: RelayHandle::new(),
         pod_assign: PodAssignChannels::new(),
-        authz: Box::new(PermissiveAuthorizer),
+        authz: Box::new(TokenAuthorizer::new(tokens.clone())),
+        tokens,
         minted_tokens: Arc::new(Mutex::new(BTreeMap::new())),
         last_scale_decisions: Arc::new(Mutex::new(Vec::new())),
     })

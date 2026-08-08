@@ -38,8 +38,8 @@ POD_VENV = ROOT / "pod" / ".venv" / "bin" / "python"
 ORCH_ADDR = "127.0.0.1:8080"
 MEMORYD_ADDR = "127.0.0.1:8091"
 POD_ADDR = "127.0.0.1:8093"
-USER_TOKEN = "dev-e2e-user-token"
-POD_TOKEN = "dev-pod-token"
+USER_TOKEN = ""  # minted at startup via POST /admin/tokens (EP-006 M1)
+POD_TOKEN = ""  # loaded from .env VIHS_POD_TOKEN (32-byte b64url, seeded at startup)
 WAIT = 20.0
 
 ANSWER_LONG = "First sentence is done. Second one is longer and gets cut before finishing."
@@ -96,6 +96,43 @@ async def wait_for_text(path: Path, pattern: str, timeout: float = WAIT) -> bool
                 return True
         await asyncio.sleep(0.25)
     return False
+
+
+def bootstrap_tokens() -> None:
+    """EP-006 M1: mint a real user token via POST /admin/tokens using the
+    seeded bootstrap admin token; load the real pod token from .env."""
+    global USER_TOKEN, POD_TOKEN
+    env = load_env(ROOT / ".env")
+    admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
+    pod_tok = env.get("VIHS_POD_TOKEN", "")
+    if not admin_tok or not pod_tok:
+        raise RuntimeError(
+            "bootstrap tokens missing: set VIHS_ADMIN_TOKEN and VIHS_POD_TOKEN "
+            "(32-byte base64url) in .env"
+        )
+    POD_TOKEN = pod_tok
+    # Mint a user token for the E2E owner. The admin listener shares the
+    # public app in dev (main.rs merges admin_routes), so ORCH_ADDR works.
+    data = json.dumps({"owner_id": "e2e-owner", "scope": "user"}).encode()
+    req = urllib.request.Request(
+        f"http://{ORCH_ADDR}/admin/tokens",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {admin_tok}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=5.0) as resp:
+            body = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"mint user token failed: {e.code} {e.read()!r}") from e
+    tok = body.get("token", "")
+    if not tok:
+        raise RuntimeError(f"mint response missing token: {body}")
+    USER_TOKEN = tok
+    print("  bootstrapped real user token via POST /admin/tokens")
 
 
 def ensure_services() -> list[subprocess.Popen]:
@@ -161,8 +198,11 @@ def stop_processes(procs: list[subprocess.Popen]) -> None:
 
 
 def api(
-    path: str, method: str = "GET", body: dict | None = None, token: str = USER_TOKEN
+    path: str, method: str = "GET", body: dict | None = None, token: str | None = None
 ) -> tuple[int, dict]:
+    global USER_TOKEN
+    if token is None:
+        token = USER_TOKEN
     url = f"http://{ORCH_ADDR}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
@@ -480,16 +520,35 @@ async def _drive_resume(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: 
 
 
 def main(argv: list[str] | None = None) -> int:
-    targets = (argv or sys.argv[1:] or ["e2e_connect", "e2e_convo", "e2e_resume"])
+    args = argv or sys.argv[1:] or ["e2e_connect", "e2e_convo", "e2e_resume"]
+    targets: list[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--smoke":
+            # Smoke = boot stack, one scripted turn, resume, delete
+            # (COMMANDS.md) — the e2e_resume target covers exactly that.
+            targets.append("e2e_resume")
+        elif arg == "--base-url":
+            # Remote-target form is not used by local verify; accept+ignore.
+            i += 1
+        else:
+            targets.append(arg)
+        i += 1
     try:
-        for target in targets:
-            if target == "e2e_connect":
-                e2e_connect()
-            elif target in ("e2e_convo", "e2e_resume"):
-                asyncio.run(_run_convo_target(target))
-            else:
-                print(f"unknown e2e target: {target}", file=sys.stderr)
-                return 2
+        owned = ensure_services()
+        try:
+            bootstrap_tokens()
+            for target in targets:
+                if target == "e2e_connect":
+                    e2e_connect()
+                elif target in ("e2e_convo", "e2e_resume"):
+                    asyncio.run(_run_convo_target(target))
+                else:
+                    print(f"unknown e2e target: {target}", file=sys.stderr)
+                    return 2
+        finally:
+            stop_processes(owned)
     except Exception as exc:  # noqa: BLE001
         print(f"e2e FAILED: {exc}", file=sys.stderr)
         return 1

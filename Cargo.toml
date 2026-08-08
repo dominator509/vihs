@@ -13,3 +13,7 @@ thiserror = "2"
 blake3 = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "io-util"] }
 axum = { version = "0.8", features = ["ws"] }
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+argon2 = "0.5"
+base64 = "0.22"
+rand = "0.8"

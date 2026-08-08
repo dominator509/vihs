@@ -56,7 +56,7 @@ async fn create_session(
     Json(body): Json<CreateSessionBody>,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session)?;
+    let principal = st.authz.allow(&token, Verb::Session).await?;
     if body.persona_id.is_empty() {
         return Err(OrchError::Invalid("persona_id required".into()));
     }
@@ -99,7 +99,7 @@ async fn connect_session(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session)?;
+    let principal = st.authz.allow(&token, Verb::Session).await?;
 
     // Owner check + session must exist (404, never 403).
     let meta = st
@@ -165,7 +165,7 @@ async fn list_sessions(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session)?;
+    let principal = st.authz.allow(&token, Verb::Session).await?;
     let sessions = st.sessions.list(&principal.owner).await;
     Ok(Json(json!({ "sessions": sessions })).into_response())
 }
@@ -177,7 +177,7 @@ async fn transcript(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session)?;
+    let principal = st.authz.allow(&token, Verb::Session).await?;
     st.sessions
         .get(&principal.owner, &session_id)
         .await
@@ -193,7 +193,7 @@ async fn delete_session(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session)?;
+    let principal = st.authz.allow(&token, Verb::Session).await?;
     st.sessions
         .get(&principal.owner, &session_id)
         .await

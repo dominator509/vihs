@@ -145,7 +145,7 @@ async fn main() {
 
     let cfg = Config::from_env();
     let memoryd = MemorydClient::new(&cfg.memoryd_addr);
-    let state = build_state(cfg.clone(), memoryd);
+    let state = build_state(cfg.clone(), memoryd).await;
 
     // Autoscaler loop.
     tokio::spawn(scaler_loop(state.clone()));

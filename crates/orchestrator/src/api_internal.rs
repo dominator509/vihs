@@ -47,7 +47,7 @@ async fn register_pod(
     Json(body): Json<RegisterBody>,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, Verb::Pod)?;
+    st.authz.allow(&token, Verb::Pod).await?;
     let id = PodId(body.pod_id.clone());
     st.registry.register(
         &id,
@@ -74,7 +74,7 @@ async fn pod_health(
     Json(body): Json<Value>,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    st.authz.allow(&token, Verb::Pod)?;
+    st.authz.allow(&token, Verb::Pod).await?;
     let id = PodId(pod_id.clone());
     let fill = body["fill"].as_u64().unwrap_or(0) as u32;
     st.registry.ping(&id, fill);

@@ -19,18 +19,18 @@ use orchestrator::session_index::SessionMeta;
 use orchestrator::{build_state, AppState};
 use serde_json::{json, Value};
 
-fn orch_state() -> Arc<AppState> {
+async fn orch_state() -> Arc<AppState> {
     let mut cfg = OrchConfig::from_env();
     cfg.provider = "mock".to_string();
     cfg.warm_pool_floor = 1;
     let mem = MemorydClient::new(&cfg.memoryd_addr);
-    build_state(cfg, mem)
+    build_state(cfg, mem).await
 }
 
 /// Tiny fake pod: register → health(ready) → hold assign WS → assert frame.
 #[tokio::test]
 async fn register_ready_assign_flow() {
-    let st = orch_state();
+    let st = orch_state().await;
     let registry: Arc<PodRegistry> = st.registry.clone();
     let pod_id = orchestrator::make_pod_id();
 
@@ -107,7 +107,7 @@ async fn register_ready_assign_flow() {
 /// acceptance: cap enforcement).
 #[tokio::test]
 async fn hard_cap_blocks_second_assignment() {
-    let st = orch_state();
+    let st = orch_state().await;
     let registry: Arc<PodRegistry> = st.registry.clone();
     let pod_id = orchestrator::make_pod_id();
 
@@ -132,7 +132,7 @@ async fn hard_cap_blocks_second_assignment() {
 /// Sessions index round-trip used by the public resume flow (owner→meta).
 #[tokio::test]
 async fn session_index_roundtrip() {
-    let st = orch_state();
+    let st = orch_state().await;
     st.sessions
         .upsert(
             "owner-1",

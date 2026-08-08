@@ -2,9 +2,11 @@
 //!
 //! Each route's response schema asserted via tower oneshot — no network.
 //! The session-scoped routes hit memoryd for the durable row, so dev
-//! services must be up (test-integration.sh gate).
+//! services must be up (test-integration.sh gate). EP-006 M1: tokens are
+//! minted from the real Redis store (no permissive mode in these tests).
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::{header, HeaderMap, Request, StatusCode};
@@ -13,6 +15,7 @@ use http_body_util::BodyExt;
 use orchestrator::api_admin::admin_routes;
 use orchestrator::api_internal::internal_routes;
 use orchestrator::api_public::public_routes;
+use orchestrator::authz::Scope;
 use orchestrator::client_static;
 use orchestrator::config::Config as OrchConfig;
 use orchestrator::memoryd_client::MemorydClient;
@@ -21,12 +24,12 @@ use orchestrator::{build_state, AppState};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
-fn state() -> Arc<AppState> {
+async fn state() -> Arc<AppState> {
     let mut cfg = OrchConfig::from_env();
     cfg.provider = "mock".to_string();
     cfg.warm_pool_floor = 1;
     let mem = MemorydClient::new(&cfg.memoryd_addr);
-    build_state(cfg, mem)
+    build_state(cfg, mem).await
 }
 
 fn app(st: Arc<AppState>) -> Router {
@@ -36,6 +39,15 @@ fn app(st: Arc<AppState>) -> Router {
         .merge(internal_routes())
         .route("/healthz", axum::routing::get(|| async { "ok" }))
         .with_state(st)
+}
+
+/// Mint a real token via the store (EP-006 M1). Owner scoping matters for
+/// the list/resume flows, so tests mint per-owner tokens.
+async fn mint(st: &Arc<AppState>, owner: &str, scope: Scope) -> String {
+    st.tokens
+        .mint(owner, scope, Duration::from_secs(3600))
+        .await
+        .expect("mint")
 }
 
 fn bearer(tok: &str) -> HeaderMap {
@@ -74,19 +86,22 @@ async fn send_json(
 
 #[tokio::test]
 async fn healthz_is_ok() {
-    let app = app(state());
+    let st = state().await;
+    let app = app(st);
     let (status, _) = send_json(&app, "GET", "/healthz", HeaderMap::new(), None).await;
     assert_eq!(status, StatusCode::OK);
 }
 
 #[tokio::test]
 async fn create_session_returns_contract() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "owner-create", Scope::User).await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
         "/v1/sessions",
-        bearer("tok-create"),
+        bearer(&tok),
         Some(json!({"persona_id": "persona-a"})),
     )
     .await;
@@ -97,12 +112,14 @@ async fn create_session_returns_contract() {
 
 #[tokio::test]
 async fn create_session_requires_persona() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "owner-create", Scope::User).await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
         "/v1/sessions",
-        bearer("tok-create"),
+        bearer(&tok),
         Some(json!({"persona_id": ""})),
     )
     .await;
@@ -112,7 +129,8 @@ async fn create_session_requires_persona() {
 
 #[tokio::test]
 async fn create_session_requires_token() {
-    let app = app(state());
+    let st = state().await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
@@ -126,24 +144,28 @@ async fn create_session_requires_token() {
 
 #[tokio::test]
 async fn list_sessions_empty_contract() {
-    let app = app(state());
-    let (status, body) = send_json(&app, "GET", "/v1/sessions", bearer("tok-list"), None).await;
+    let st = state().await;
+    let tok = mint(&st, "owner-list", Scope::User).await;
+    let app = app(st);
+    let (status, body) = send_json(&app, "GET", "/v1/sessions", bearer(&tok), None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["sessions"].is_array(), "contract: {body}");
 }
 
 #[tokio::test]
 async fn list_sessions_shows_created() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "owner-list", Scope::User).await;
+    let app = app(st);
     let (_, _) = send_json(
         &app,
         "POST",
         "/v1/sessions",
-        bearer("tok-list"),
+        bearer(&tok),
         Some(json!({"persona_id": "persona-a"})),
     )
     .await;
-    let (_, body) = send_json(&app, "GET", "/v1/sessions", bearer("tok-list"), None).await;
+    let (_, body) = send_json(&app, "GET", "/v1/sessions", bearer(&tok), None).await;
     assert_eq!(body["sessions"].as_array().unwrap().len(), 1, "{body}");
     let row = &body["sessions"][0];
     assert!(row["session_id"].is_string());
@@ -153,12 +175,14 @@ async fn list_sessions_shows_created() {
 
 #[tokio::test]
 async fn resume_unknown_session_404_not_403() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "owner-resume", Scope::User).await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
         "/v1/sessions/does-not-exist/resume",
-        bearer("tok-resume"),
+        bearer(&tok),
         None,
     )
     .await;
@@ -168,13 +192,15 @@ async fn resume_unknown_session_404_not_403() {
 
 #[tokio::test]
 async fn resume_no_capacity_queues_503() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "owner-resume", Scope::User).await;
+    let app = app(st);
     // Create a session, then resume with NO pods registered → must queue 503.
     let (status, created) = send_json(
         &app,
         "POST",
         "/v1/sessions",
-        bearer("tok-resume"),
+        bearer(&tok),
         Some(json!({"persona_id": "persona-a"})),
     )
     .await;
@@ -185,7 +211,7 @@ async fn resume_no_capacity_queues_503() {
         &app,
         "POST",
         format!("/v1/sessions/{sid}/resume").as_str(),
-        bearer("tok-resume"),
+        bearer(&tok),
         None,
     )
     .await;
@@ -197,23 +223,29 @@ async fn resume_no_capacity_queues_503() {
 
 #[tokio::test]
 async fn delete_unknown_session_404() {
-    let app = app(state());
-    let (status, _) = send_json(&app, "DELETE", "/v1/sessions/nope", bearer("tok-del"), None).await;
+    let st = state().await;
+    let tok = mint(&st, "owner-del", Scope::User).await;
+    let app = app(st);
+    let (status, _) = send_json(&app, "DELETE", "/v1/sessions/nope", bearer(&tok), None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]
 async fn admin_pods_contract() {
-    let app = app(state());
-    let (status, body) = send_json(&app, "GET", "/admin/pods", bearer("admin-1"), None).await;
+    let st = state().await;
+    let tok = mint(&st, "root", Scope::Admin).await;
+    let app = app(st);
+    let (status, body) = send_json(&app, "GET", "/admin/pods", bearer(&tok), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["pods"].is_array());
 }
 
 #[tokio::test]
 async fn admin_scale_contract() {
-    let app = app(state());
-    let (status, body) = send_json(&app, "GET", "/admin/scale", bearer("admin-1"), None).await;
+    let st = state().await;
+    let tok = mint(&st, "root", Scope::Admin).await;
+    let app = app(st);
+    let (status, body) = send_json(&app, "GET", "/admin/scale", bearer(&tok), None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["fill"].is_u64());
     assert!(body["cap"].is_u64());
@@ -224,12 +256,14 @@ async fn admin_scale_contract() {
 
 #[tokio::test]
 async fn admin_token_mint_contract() {
-    let app = app(state());
+    let st = state().await;
+    let admin_tok = mint(&st, "root", Scope::Admin).await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
         "/admin/tokens",
-        bearer("admin-1"),
+        bearer(&admin_tok),
         Some(json!({"owner_id": "owner-x", "scope": "user"})),
     )
     .await;
@@ -238,13 +272,36 @@ async fn admin_token_mint_contract() {
 }
 
 #[tokio::test]
+async fn admin_token_mint_rejects_user_scope_token() {
+    // A USER token must not mint (A6 — admin scope only on admin listener).
+    let st = state().await;
+    let user_tok = mint(&st, "owner-x", Scope::User).await;
+    let app = app(st);
+    let (status, _) = send_json(
+        &app,
+        "POST",
+        "/admin/tokens",
+        bearer(&user_tok),
+        Some(json!({"owner_id": "owner-y", "scope": "user"})),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "user token on admin route"
+    );
+}
+
+#[tokio::test]
 async fn internal_register_contract() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "pod-1", Scope::Pod).await;
+    let app = app(st);
     let (status, body) = send_json(
         &app,
         "POST",
         "/internal/pods/register",
-        bearer("pod-tok"),
+        bearer(&tok),
         Some(json!({"pod_id": "pod-1", "addr": "127.0.0.1:9001", "cap": 2, "versions": {"stages": ["mock"]}})),
     )
     .await;
@@ -255,12 +312,14 @@ async fn internal_register_contract() {
 
 #[tokio::test]
 async fn internal_health_contract() {
-    let app = app(state());
+    let st = state().await;
+    let tok = mint(&st, "pod-h", Scope::Pod).await;
+    let app = app(st);
     let (_, _) = send_json(
         &app,
         "POST",
         "/internal/pods/register",
-        bearer("pod-tok"),
+        bearer(&tok),
         Some(json!({"pod_id": "pod-h", "addr": "127.0.0.1:9002", "cap": 2})),
     )
     .await;
@@ -268,7 +327,7 @@ async fn internal_health_contract() {
         &app,
         "POST",
         "/internal/pods/pod-h/health",
-        bearer("pod-tok"),
+        bearer(&tok),
         Some(json!({"fill": 1})),
     )
     .await;
@@ -282,19 +341,20 @@ async fn internal_health_contract() {
 
 #[tokio::test]
 async fn drain_pod_gets_no_new_assignments() {
-    let st = state();
+    let st = state().await;
     let registry = st.registry.clone();
     let id = PodId("pod-drain".to_string());
     registry.register(&id, "127.0.0.1:0".to_string(), 2, None);
     registry.ready(&id);
 
     // Drain via the admin route.
+    let admin_tok = mint(&st, "root", Scope::Admin).await;
     let app = app(st.clone());
     let (status, body) = send_json(
         &app,
         "POST",
         "/admin/pods/pod-drain/drain",
-        bearer("admin-1"),
+        bearer(&admin_tok),
         None,
     )
     .await;
@@ -313,12 +373,14 @@ async fn drain_pod_gets_no_new_assignments() {
 
 #[tokio::test]
 async fn drain_unknown_pod_404() {
-    let app = app(state());
+    let st = state().await;
+    let admin_tok = mint(&st, "root", Scope::Admin).await;
+    let app = app(st);
     let (status, _) = send_json(
         &app,
         "POST",
         "/admin/pods/ghost/drain",
-        bearer("admin-1"),
+        bearer(&admin_tok),
         None,
     )
     .await;
