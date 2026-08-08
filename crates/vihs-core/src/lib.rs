@@ -8,6 +8,7 @@
 pub mod chain;
 pub mod event;
 pub mod ids;
+pub mod redact;
 pub mod render;
 
 pub use chain::{canonical_bytes, compute_hash, seal, ChainError, GENESIS};

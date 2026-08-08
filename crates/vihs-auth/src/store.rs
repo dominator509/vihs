@@ -69,6 +69,18 @@ fn redis_key(token_id: &str) -> String {
     format!("token:{token_id}")
 }
 
+/// Derive the stable `token_id` (16-byte base64url prefix) from a raw token.
+/// Used for rate-limit keying and audit ids — never log the raw token itself
+/// (OBSERVABILITY.md redaction). Returns None for malformed tokens.
+pub fn token_id(token: &str) -> Option<String> {
+    let raw = URL_SAFE_NO_PAD.decode(token).ok()?;
+    if raw.len() != TOKEN_TOTAL_BYTES {
+        return None;
+    }
+    let (id_bytes, _) = raw.split_at(TOKEN_ID_BYTES);
+    Some(URL_SAFE_NO_PAD.encode(id_bytes))
+}
+
 /// Redis-backed token store. Cheap to clone (Arc<ConnectionManager>).
 #[derive(Clone)]
 pub struct TokenStore {

@@ -46,10 +46,18 @@ pub async fn signal_socket(
         }))
         .into_response();
     }
-    ws.on_upgrade(move |socket| handle_signal(socket, st, connection_id))
+    // Rate-limit key (SPEC-005 A5: signaling ≤50/s per token) — derived from
+    // the stable token id, never the raw token (OBSERVABILITY redaction).
+    let rate_key = vihs_auth::token_id(&token).unwrap_or_else(|| token.clone());
+    ws.on_upgrade(move |socket| handle_signal(socket, st, connection_id, rate_key))
 }
 
-async fn handle_signal(mut client: WebSocket, st: Arc<AppState>, connection_id: String) {
+async fn handle_signal(
+    mut client: WebSocket,
+    st: Arc<AppState>,
+    connection_id: String,
+    rate_key: String,
+) {
     // Look up the pod that owns this connection (bound at assignment).
     let pod_conn = {
         let routes = st.relay.routes.lock().await;
@@ -106,10 +114,15 @@ async fn handle_signal(mut client: WebSocket, st: Arc<AppState>, connection_id: 
         .await;
 
     // Two pump tasks: client→pod, pod→client. Stop when either side closes.
-    let (mut client_sink, mut client_stream) = client.split();
+    let (client_sink, mut client_stream) = client.split();
     let (mut pod_sink, mut pod_stream) = pod_ws.split();
+    // The rate-limit error frame must reach the client, so the client sink is
+    // shared between the pumps (SPEC-005 A5 signaling ≤50/s per token).
+    let client_sink = std::sync::Arc::new(tokio::sync::Mutex::new(client_sink));
 
     // client → pod
+    let c2p_st = st.clone();
+    let c2p_sink = client_sink.clone();
     let c2p = tokio::spawn(async move {
         while let Some(Ok(msg)) = client_stream.next().await {
             let text = match msg {
@@ -120,6 +133,24 @@ async fn handle_signal(mut client: WebSocket, st: Arc<AppState>, connection_id: 
                 Ok(v) => v,
                 Err(_) => continue,
             };
+            // SPEC-005 A5: signaling messages ≤50/s per token → rate_limited
+            // error frame + close (abuse control; SPEC-006 signaling row).
+            if c2p_st
+                .ratelimit
+                .check(&rate_key, crate::ratelimit::RateClass::Signal)
+                .is_err()
+            {
+                let _ = c2p_sink
+                    .lock()
+                    .await
+                    .send(Message::Text(
+                        json!({"t":"error","code":"rate_limited","message":"signaling rate limit exceeded","retryable":true})
+                            .to_string()
+                            .into(),
+                    ))
+                    .await;
+                break;
+            }
             // Forward validated client frames to the pod.
             if crate::signal::validate_client_frame(&v).is_ok() {
                 let _ = pod_sink
@@ -138,7 +169,13 @@ async fn handle_signal(mut client: WebSocket, st: Arc<AppState>, connection_id: 
             tokio_tungstenite::tungstenite::Message::Close(_) => break,
             _ => continue,
         };
-        if client_sink.send(Message::Text(text.into())).await.is_err() {
+        if client_sink
+            .lock()
+            .await
+            .send(Message::Text(text.into()))
+            .await
+            .is_err()
+        {
             break;
         }
     }

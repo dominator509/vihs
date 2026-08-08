@@ -58,16 +58,11 @@ impl Authorizer for TokenAuthorizer {
             .map_err(|_| AuthzErr::InvalidToken)?;
         let scope = p.scope;
         let owner = p.owner.clone();
-        let snap_state = match self.index.snapshot(sid).await {
-            Ok(s) => Some(s.owner.clone().unwrap_or_default()),
-            Err(_) => None,
-        };
         tracing::debug!(
             sid = %sid.as_str(),
             verb = ?verb,
             scope = ?scope,
-            owner = %owner,
-            snap_owner = ?snap_state,
+            owner_hash = %vihs_core::redact::owner_hash(&owner),
             "authz decision",
         );
         let decision = match p.scope {
@@ -113,8 +108,7 @@ impl Authorizer for TokenAuthorizer {
             sid = %sid.as_str(),
             verb = ?verb,
             scope = ?scope,
-            owner = %owner,
-            snap_owner = ?snap_state,
+            owner_hash = %vihs_core::redact::owner_hash(&owner),
             "authz result",
         );
         decision

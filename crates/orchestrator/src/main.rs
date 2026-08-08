@@ -18,6 +18,33 @@ use orchestrator::scaler::{decide, FleetView, ScaleAction};
 use orchestrator::signal_route::{client_routes, signal_socket};
 use orchestrator::{build_state, AppState};
 
+/// Redaction middleware (OBSERVABILITY.md; EP-006 M4): every log line is
+/// scrubbed at the writer boundary — bearer tokens, signed-URL credentials.
+/// Raw owner ids are prevented at the emission sites (owner_hash); this is
+/// the second layer of defense for anything that slips through.
+#[derive(Clone, Default)]
+struct ScrubWriter;
+
+impl std::io::Write for ScrubWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let line = String::from_utf8_lossy(buf);
+        let scrubbed = vihs_core::redact::scrub_log_line(&line);
+        let mut out = std::io::stdout();
+        out.write_all(scrubbed.as_bytes())?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::stdout().flush()
+    }
+}
+
+impl tracing_subscriber::fmt::MakeWriter<'_> for ScrubWriter {
+    type Writer = ScrubWriter;
+    fn make_writer(&self) -> Self::Writer {
+        ScrubWriter
+    }
+}
+
 /// Autoscaler executor loop: read fleet → decide → act. Runs every second.
 async fn scaler_loop(st: Arc<AppState>) {
     let mut tick = tokio::time::interval(std::time::Duration::from_secs(1));
@@ -141,6 +168,7 @@ async fn main() {
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
+        .with_writer(ScrubWriter)
         .init();
 
     let cfg = Config::from_env();

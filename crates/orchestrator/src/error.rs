@@ -36,9 +36,13 @@ impl OrchError {
         }
     }
     pub fn retryable(&self) -> bool {
+        // SPEC-006 R1: rate_limited is caller-retry with backoff (EP-006 M4).
         matches!(
             self,
-            OrchError::NoCapacity(_) | OrchError::Provider(_) | OrchError::Upstream(_)
+            OrchError::NoCapacity(_)
+                | OrchError::Provider(_)
+                | OrchError::Upstream(_)
+                | OrchError::RateLimited(_)
         )
     }
     pub fn status(&self) -> axum::http::StatusCode {

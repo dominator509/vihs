@@ -13,4 +13,6 @@
 
 pub mod store;
 
-pub use store::{Principal, Scope, TokenError, TokenStore, DEFAULT_TOKEN_TTL, POD_TOKEN_TTL};
+pub use store::{
+    token_id, Principal, Scope, TokenError, TokenStore, DEFAULT_TOKEN_TTL, POD_TOKEN_TTL,
+};

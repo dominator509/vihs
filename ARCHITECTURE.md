@@ -56,7 +56,9 @@ untouched.
 
 ## 3. Layer responsibilities and dependency rules
 - `vihs-core` (Layer 0): event schema, canonical encoding, blake3 hash chain,
-  markdown render, ID types. Depends on nothing else in the workspace.
+  markdown render, ID types, redaction helpers (owner_hash blake3 8-hex +
+  scrub_log_line for the log boundary — EP-006 M4). Depends on nothing else
+  in the workspace.
 - `vihs-auth` (Layer 0): the shared token store — mint/seed/verify/revoke,
   Scope/Principal, argon2id+pepper params (SPEC-005). Added in EP-006 M3 so
   memoryd verifies tokens minted by orchestrator with ONE implementation and

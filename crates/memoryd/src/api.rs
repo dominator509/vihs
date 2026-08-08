@@ -109,7 +109,11 @@ async fn append_event(
             st.index
                 .create_session(&sid, &principal.owner, &now)
                 .await?;
-            tracing::debug!(sid = %sid.as_str(), owner = %principal.owner, "authz create-path owner stamped");
+            tracing::debug!(
+                sid = %sid.as_str(),
+                owner_hash = %vihs_core::redact::owner_hash(&principal.owner),
+                "authz create-path owner stamped"
+            );
         } else {
             tracing::debug!(sid = %sid.as_str(), "authz record owner already bound");
         }
@@ -287,6 +291,22 @@ async fn delete_session(
         .await
         .map_err(|_| MemorydError::NotFound(sid.to_string()))?;
     crate::sweep::hard_delete(&sid, &st.store, &st.index, Some(&principal.owner)).await?;
+    // SPEC-005 A7: hard delete is audited (ids only; owner hashed) — the
+    // orchestrator also audits the user-facing DELETE; memoryd audits the
+    // durable path (any caller, not just the orchestrator route).
+    tracing::info!(
+        target: "audit",
+        line = %serde_json::json!({
+            "ts": chrono::Utc::now().to_rfc3339(),
+            "level": "info",
+            "service": "memoryd",
+            "event": "session_deleted",
+            "fields": {
+                "session_id": sid.as_str(),
+                "owner_hash": vihs_core::redact::owner_hash(&principal.owner),
+            }
+        }).to_string(),
+    );
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

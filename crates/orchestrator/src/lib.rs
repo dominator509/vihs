@@ -6,6 +6,7 @@
 pub mod api_admin;
 pub mod api_internal;
 pub mod api_public;
+pub mod audit;
 pub mod authz;
 pub mod client_static;
 pub mod config;
@@ -14,6 +15,7 @@ pub mod memoryd_client;
 pub mod provider;
 pub mod provider_mock;
 pub mod queue;
+pub mod ratelimit;
 pub mod registry;
 pub mod router;
 pub mod scaler;
@@ -35,6 +37,7 @@ use crate::memoryd_client::MemorydClient;
 use crate::provider::{PodId, PodProvider};
 use crate::provider_mock::MockProvider;
 use crate::queue::SessionQueue;
+use crate::ratelimit::RateLimiter;
 use crate::registry::PodRegistry;
 use crate::session_index::SessionIndex;
 use crate::signal::RelayHandle;
@@ -52,6 +55,7 @@ pub struct AppState {
     pub pod_assign: Arc<PodAssignChannels>,
     pub authz: Box<dyn Authorizer>,
     pub tokens: TokenStore,
+    pub ratelimit: Arc<RateLimiter>,
     pub minted_tokens: Arc<Mutex<BTreeMap<String, Value>>>,
     pub last_scale_decisions: Arc<Mutex<Vec<Value>>>,
 }
@@ -134,6 +138,7 @@ pub async fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
         pod_assign: PodAssignChannels::new(),
         authz: Box::new(TokenAuthorizer::new(tokens.clone())),
         tokens,
+        ratelimit: Arc::new(RateLimiter::new()),
         minted_tokens: Arc::new(Mutex::new(BTreeMap::new())),
         last_scale_decisions: Arc::new(Mutex::new(Vec::new())),
     })

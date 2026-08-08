@@ -70,7 +70,46 @@ Token tests namespace token_ids; revocation tests clean up. Re-runnable.
 
 ## 12. Progress
 - [x] M1 tokens  - [x] M2 orch matrix  - [x] M3 memoryd/pod scope
-- [ ] M4 limits+redaction  - [ ] M5 client+e2e
+- [x] M4 limits+redaction  - [ ] M5 client+e2e
+
+M4 notes (validation `sh scripts/security-check.sh` = SECURITY OK; workspace
+130 green; clippy 0; fmt clean; VERIFY OK — preflight/lint/format/typecheck/
+unit/integration/e2e(3-target)/build/security/dependency-audit/smoke all OK):
+- NEW `vihs-core/src/redact.rs`: `owner_hash()` (blake3 prefix, 8 hex —
+  OBSERVABILITY.md redaction) + `scrub_log_line()` (masks bearer tokens and
+  AWS SigV4 presigned-URL creds X-Amz-Signature/-Credential/-Security-Token).
+  7 `redaction_*`-named tests — the security-check.sh gate runs
+  `cargo test --workspace redaction` and previously SKIPped because no test
+  name matched; now 7 run in the gate.
+- NEW `crates/orchestrator/src/ratelimit.rs`: fixed-window per (token_id,
+  class) in-memory limiter — Create ≤10/min, Resume ≤30/min, Signal ≤50/s
+  (SPEC-005 A5), over-limit → `OrchError::RateLimited` (429 `rate_limited`).
+  Clock-injected (`check_at`) for tests; 7 unit tests. Keyed by
+  `vihs_auth::token_id()` (16-byte base64url prefix) — never the raw token.
+- NEW `vihs_auth::token_id()` pub helper — derives the stable lookup id
+  from a raw token (rate-limit keying; the derive previously lived only
+  inside TokenStore's private `redis_key`).
+- Wiring: `create_session` → Create class; `connect_session` (resume AND
+  connect) → Resume class; signal WS c2p pump → Signal class per client
+  frame (rate_limited error frame + close; client sink shared between pumps
+  via Arc<Mutex> so the error frame reaches the client). OrchError::retryable()
+  now returns true for RateLimited (SPEC-006 R1 — it was false, a real bug).
+- NEW `crates/orchestrator/src/audit.rs`: structured audit lines (ids only,
+  owner hashed via owner_hash): `session_deleted` (orchestrator DELETE route
+  AND memoryd durable delete — SPEC-005 A7) + `token_minted` (admin mint,
+  raw token never logged). 4 audit-line-shape tests.
+- Redaction middleware: ScrubWriter (tracing_subscriber MakeWriter applying
+  `scrub_log_line` to every line) installed in BOTH services' main.rs —
+  the log boundary scrubs tokens/signed URLs even if a future log site
+  leaks; raw owner ids fixed at the source (memoryd authz.rs debug logs +
+  api.rs create-path log now emit owner_hash, not the raw owner).
+- Tests: `crates/orchestrator/tests/rate_limit.rs` — 3 integration tests:
+  create 10→429 with `rate_limited` retryable=true, resume 30→429 (404s on
+  owner check prove the limiter fires independently of route outcome),
+  per-token budget isolation.
+- Fixed along the way: LINT gate greps vihs-core/src for sibling crate names
+  (memoryd/orchestrator) — a redact.rs test fixture string tripped it;
+  renamed to a service-neutral line.
 
 M3 notes (validation `cargo test -p memoryd authz` = 10 green; workspace
 110 green; clippy 0; fmt clean; VERIFY OK):
@@ -139,6 +178,28 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   3-target E2E gate GREEN.
 
 ## 13. Surprises & Discoveries
+- M4: the security-check.sh redaction gate was silently SKIPping — it runs
+  `cargo test --workspace redaction` (FILTER BY TEST NAME), and M1–M3 added
+  no test whose name contains "redaction". M4's tests are named
+  `redaction_*` so the gate actually executes them now (7 pass).
+- M4: `OrchError::retryable()` returned FALSE for `RateLimited` — a real
+  SPEC-006 R1 violation that M3's authz work didn't touch (no RateLimited
+  was ever produced). M4's rate limiter produces it, so the bug surfaced
+  exactly when it mattered.
+- M4: the LINT gate greps vihs-core/src for the literal sibling crate names
+  (`memoryd`, `orchestrator`) — a redact.rs unit-test fixture string
+  ("memoryd listening on…") tripped it. The Layer-0 crate must not even
+  NAME its siblings in comments/tests.
+- M4: the `.env` display redaction (`="` → `***`) hit a test-file write via
+  write_file — the `format!("Authorization: Bearer {token}")` fixture line
+  arrived corrupted. Worked around by building the "Bearer " prefix with
+  `concat!()` in the test so no literal `Bearer "` sequence exists in the
+  source file (also keeps the file clean for the secret-scan pattern).
+- Pre-existing (M3, still open): dependency-audit.sh swallows cargo-audit's
+  non-zero exit (`|| echo NOTE not installed`) — 3 rustls-webpki RUSTSECs
+  via aws-smithy are printed but never fail the gate. aws-sdk upgrade
+  deferred (dependency swap — needs its own decision). Not M4-introduced.
+
 - M3: the strict owner check exposed a parallel-suite race — the memoryd
   `integ_rebuild` test replays the WHOLE shared bucket and `heal()`s every
   session, creating index records with NO owner field. A fixed-sid test
@@ -194,6 +255,34 @@ M1 notes (validation `cargo test --workspace` = 94 green; clippy 0; fmt clean):
   delete per COMMANDS.md).
 
 ## 14. Decision Log
+- M4: rate limiting is in-memory (fixed-window per token_id), not Redis.
+  Evidence: the orchestrator is a single process (dev + EP-009 target), and
+  SPEC-005 A5 names per-token limits without a shared-storage requirement.
+  Redis would add a round-trip per request for no correctness gain at this
+  scale; the limiter is clock-injected so a distributed backend can replace
+  it without touching handlers.
+- M4: rate-limit key = stable token_id (16-byte base64url prefix) via the
+  new `vihs_auth::token_id()`, NOT the raw token. Evidence: OBSERVABILITY.md
+  forbids logging/storing tokens; the limiter must not hold secrets in
+  memory. token_id is already the Redis lookup key, so it is stable and
+  unique per token.
+- M4: redaction middleware is a MakeWriter at the log boundary (ScrubWriter),
+  plus owner_hash at emission sites. Evidence: a writer-level scrub catches
+  ANY future leak (tokens, signed URLs) regardless of which code site emits
+  it; owner ids can't be pattern-matched generically (session ids are also
+  UUIDs), so raw owner ids are prevented at the source instead. Both layers
+  together satisfy OBSERVABILITY.md's tested redaction.
+- M4: audit events are `session_deleted` (orchestrator route + memoryd
+  durable path) and `token_minted` (admin mint). SPEC-005 A7 requires hard
+  delete to be audited ids-only; mint is a security-relevant admin action
+  whose raw token must never appear in logs. Session create/append are not
+  audited — volume would bury the security signal (rate limiter + authz
+  already cover them).
+- M4 files beyond §6 (AGENTS §5): vihs-core/src/redact.rs and
+  vihs-auth token_id() are the shared helpers both services' middleware
+  depend on — the layer-0 home is required by ARCHITECTURE §3 (no
+  cross-service import). memoryd/src/api.rs + authz.rs changes are the
+  owner-id redaction fixes and the durable delete audit. All M4-necessary.
 - M3: shared token store moved to NEW crate `vihs-auth` (Layer 0) instead of
   duplicating the crypto in memoryd. Evidence: SPEC-005 A1 (memoryd verifies
   tokens minted by orchestrator); vihs-core declares itself pure zero-I/O

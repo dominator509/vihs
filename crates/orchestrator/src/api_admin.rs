@@ -122,6 +122,8 @@ async fn mint_token(
         .tokens
         .mint(&body.owner_id, scope, crate::tokens::DEFAULT_TOKEN_TTL)
         .await?;
+    // Audit (ids only — the raw token is never logged; owner hashed).
+    crate::audit::audit_mint("orchestrator", &body.owner_id, &body.scope);
     Ok(Json(json!({ "token": minted })).into_response())
 }
 

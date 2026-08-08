@@ -15,9 +15,15 @@ use serde_json::json;
 use crate::authz::Verb;
 use crate::error::OrchError;
 use crate::queue::QueuedSession;
+use crate::ratelimit::RateClass;
 use crate::router;
 use crate::session_index::SessionMeta;
 use crate::AppState;
+
+/// Derive the stable token id for rate-limit keying (never log the raw token).
+fn rate_key(token: &str) -> String {
+    vihs_auth::token_id(token).unwrap_or_else(|| token.to_string())
+}
 
 #[derive(Deserialize)]
 struct CreateSessionBody {
@@ -57,6 +63,8 @@ async fn create_session(
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
     let principal = st.authz.allow(&token, Verb::Session).await?;
+    // SPEC-005 A5: session create ≤10/min per token → 429 rate_limited.
+    st.ratelimit.check(&rate_key(&token), RateClass::Create)?;
     if body.persona_id.is_empty() {
         return Err(OrchError::Invalid("persona_id required".into()));
     }
@@ -100,6 +108,8 @@ async fn connect_session(
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
     let principal = st.authz.allow(&token, Verb::Session).await?;
+    // SPEC-005 A5: resume ≤30/min per token → 429 rate_limited.
+    st.ratelimit.check(&rate_key(&token), RateClass::Resume)?;
 
     // Owner check + session must exist (404, never 403).
     let meta = st
@@ -202,6 +212,8 @@ async fn delete_session(
     st.memoryd.delete_session(&session_id, &token).await?;
     st.sessions.remove(&principal.owner, &session_id).await;
     st.queue.remove(&session_id).await;
+    // SPEC-005 A7: hard delete is audited (ids only; owner hashed).
+    crate::audit::audit_delete("orchestrator", &session_id, &principal.owner);
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
