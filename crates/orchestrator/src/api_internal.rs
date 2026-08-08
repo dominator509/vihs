@@ -105,6 +105,10 @@ async fn handle_assign_socket(mut socket: WebSocket, st: Arc<AppState>, pod_id: 
                     Some(Ok(Message::Text(text))) => {
                         if let Ok(v) = serde_json::from_str::<Value>(&text) {
                             if v["t"] == "ready" {
+                                // The pod's ready ping IS the readiness
+                                // transition: stages up + assign channel live
+                                // ⇒ eligible for assignment (SPEC-003).
+                                st.registry.ready(&PodId(pod_id.clone()));
                                 let _ = socket
                                     .send(Message::Text(
                                         json!({"t":"ack","pod_id":pod_id}).to_string().into(),

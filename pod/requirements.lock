@@ -2,3 +2,7 @@ pytest==9.0.3
 pytest-asyncio==1.0.0
 mypy==1.15.0
 ruff==0.9.10
+aiortc==1.15.0
+av==17.1.0
+websockets==17.0.1
+numpy==2.5.1

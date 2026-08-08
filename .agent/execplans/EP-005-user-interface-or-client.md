@@ -173,10 +173,11 @@ milestone's pytest selector to locate state; mocks are deterministic so
 reruns are exact.
 
 ## 12. Progress
-- [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [ ] M4 agent
+- [x] M1 units  - [x] M2 context+client  - [x] M3 pipeline  - [x] M4 agent
 - [ ] M5 client E2E  - [ ] M6 latency  - [ ] M7 real adapters
 
 ## 13. Surprises & Discoveries
+### M1-M3
 - `run_response`/`abort_response` live in `pipeline/flow.py`, not
   `pipeline/__init__.py` (plan §7); `__init__` re-exports them so the
   package surface matches the plan contract.
@@ -192,6 +193,26 @@ reruns are exact.
   tests; requirements.lock gains pytest-asyncio + httpx (memory client).
 - Mock TTS must cover the raw clause text INCLUDING whitespace so ledger
   `chars_covered` math is byte-exact (test_pipeline_flow relies on it).
+### M4
+- aiortc 1.15 is NON-TRICKLE: candidates are embedded in the local
+  description SDP after gathering completes; there are no `icecandidate`
+  events and no `RTCIceCandidate.to_dict()` (use `dataclasses.asdict`).
+  `RTCDataChannel.send` is synchronous (no await). A single-PC self-answer
+  is rejected (`InvalidStateError`) — the loopback needs two PCs exchanging
+  full SDP (which is exactly the relay frame flow anyway).
+- REAL production bug found by e2e_connect: `registry.ready()` had NO
+  production caller — every registered pod stayed Booting and connect
+  returned 503 no_capacity. The M1 test called `registry.ready()` directly,
+  masking the missing wiring. Fix: the pod's `{"t":"ready"}` on the assign
+  WS now performs the readiness transition (SPEC-003 semantics).
+- websockets 17 keeps `process_request` for HTTP answers; WS handler is
+  single-arg `(ServerConnection)`; `request.path` INCLUDES the query string
+  — split on "?" before matching.
+- aiortc 1.15 does NOT depend on aiohttp (deps: aioice, av, pyee,
+  websockets) — the pod surface uses websockets only.
+- numpy 2.5.1 stubs require mypy `python_version = "3.12"` (config was 3.11).
+- The long-running dev orchestrator binary was STALE (404 on
+  /internal/pods/register); restart services from the current build.
 
 ## 14. Decision Log
 - D1 (M1-M3): Keep `flow.py` as the task-graph module; re-export from
@@ -200,4 +221,16 @@ reruns are exact.
   widens safely; typed unions enforced at call sites.
 - D3 (M1-M3): Consolidated mocks in `mocks/stages.py`; per-stage files
   deferred to M7 with the real adapters they mock.
+- D4 (M4): pod local surface via websockets 17 `process_request` (no aiohttp
+  — aiortc 1.15 has no aiohttp dependency).
+- D5 (M4): new files beyond §6 list — `pod/vihs_pod/webrtc_loopback.py`
+  (in-process two-PC media proof) and `tests/e2e/run_e2e.py` (e2e harness,
+  the M4/M5 gate). Both are M4/M5 scope; logged per AGENTS §9.
+- D6 (M4): env vars `VIHS_POD_ADDR` + `VIHS_POD_TOKEN` added to
+  ENVIRONMENT.md registry, .env.example, .env.
+- D7 (M4): `test_smoke.py` rewritten — the EP-001 "pod ready" stub contract
+  is obsolete; it now pins the URL-builder + SPEC-003 health shape.
+- D8 (M4): M4's captions proof is an in-process two-PC loopback; the signal
+  WS handler routes to the assignment's SignalBridge and is exercised by the
+  browser client in M5.
 ## 15. Outcomes & Retrospective
