@@ -25,7 +25,6 @@ which requires a live event loop (aiortc 1.15).
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import signal
 import subprocess
@@ -38,11 +37,8 @@ sys.path.insert(0, str(ROOT / "tests" / "e2e"))
 
 # Reuse the e2e harness's battle-tested helpers (same public-surface style).
 from run_e2e import (  # noqa: E402
-    ANSWER_LONG,
     ANSWER_SHORT,
     MOCK_ANSWERS,
-    ORCH_ADDR,
-    POD_ADDR,
     ClientPeer,
     _connect_session,
     _start_pod_agent,
@@ -62,7 +58,9 @@ def admin_token() -> str:
     env = load_env(ROOT / ".env")
     tok = env.get("VIHS_ADMIN_TOKEN", "")
     if not tok:
-        raise RuntimeError("VIHS_ADMIN_TOKEN missing from .env (chaos admin poll needs it)")
+        raise RuntimeError(
+            "VIHS_ADMIN_TOKEN missing from .env (chaos admin poll needs it)"
+        )
     return tok
 
 
@@ -90,7 +88,9 @@ async def wait_pod_dead(pod_id: str, timeout: float = 45.0) -> None:
             print(f"  orchestrator marked {pod_id} dead/absent (state={state})")
             return
         await asyncio.sleep(1)
-    raise RuntimeError(f"pod {pod_id} not marked dead within {timeout}s (state={state})")
+    raise RuntimeError(
+        f"pod {pod_id} not marked dead within {timeout}s (state={state})"
+    )
 
 
 def fsck_fleet_sweep() -> None:
@@ -171,15 +171,32 @@ async def main() -> int:
         connection_id_b = body["connect"]["connection_id"]
         if not await wait_for_text(log_b, "resume=True", timeout=10.0):
             raise RuntimeError("pod B did not receive resume=True")
-        print(f"  resumed on fresh pod B ({pod_id_b}); cursor last_turn_id={body.get('last_turn_id')}")
+        print(
+            f"  resumed on fresh pod B ({pod_id_b}); cursor last_turn_id={body.get('last_turn_id')}"
+        )
 
-        # Turn 3 on pod B commits normally.
+        # Turn 3 on pod B commits normally. NOTE: the resumed pod's FIRST
+        # commit number is cursor-derived, not fixed. Under M1's synchronous
+        # append, turn 2's user event was always durable before the kill
+        # (cursor=2 → first commit=3). Since M2's async buffer (ARCHITECTURE
+        # §9: the media path never blocks on memoryd), the user event of the
+        # in-flight turn is enqueued and the flusher drains it in the
+        # background — a kill inside that ~1s append window loses it, which
+        # SPEC-006 sanctions ("at most the in-flight turn is lost", INV-3).
+        # So: expect `last_turn_id + 1` — the first durable turn AFTER the
+        # resume cursor, whatever the cursor is.
+        first_commit = int(body.get("last_turn_id", 0)) + 1
         peer_b = ClientPeer(connection_id_b)
         await peer_b.connect()
         await peer_b.say("Second message after resume.")
         await peer_b.wait_caption(timeout=10.0)
-        if not await wait_for_text(log_b, "committed turn=3", timeout=10.0):
-            raise RuntimeError("resumed turn 3 did not commit")
+        if not await wait_for_text(
+            log_b, f"committed turn={first_commit}", timeout=10.0
+        ):
+            raise RuntimeError(
+                f"resumed first turn ({first_commit}) did not commit "
+                f"(cursor was {body.get('last_turn_id')})"
+            )
         await peer_b.close()
 
         # INV-1: transcript has the durable turns but NEVER the unplayed tail

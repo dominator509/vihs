@@ -22,6 +22,7 @@ from typing import Any, cast
 
 from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 
+from vihs_pod.append_buffer import AppendBuffer
 from vihs_pod.captions import CaptionsChannel
 from vihs_pod.health import SignalBridge
 from vihs_pod.memory_client import MemoryClient
@@ -162,6 +163,9 @@ class Conversation:
         self._turn_id = int(cursor.get("last_turn_id", 0))
         self._responding: asyncio.Task[Any] | None = None
         self._tasks: list[asyncio.Task[Any]] = []
+        # R2 append buffer (ARCHITECTURE §9): committed events are queued and
+        # flushed in the background — the media path never blocks on memoryd.
+        self.append_buffer = AppendBuffer(memory, session_id)
 
     async def start(self) -> None:
         @self.pc.on("datachannel")
@@ -175,6 +179,7 @@ class Conversation:
 
         self._tasks.append(asyncio.create_task(self._signaling_loop()))
         self._tasks.append(asyncio.create_task(self._response_loop()))
+        self.append_buffer.start()
 
     # --- signaling ---
 
@@ -267,7 +272,9 @@ class Conversation:
             "text": text,
             "meta": {"interrupted": interrupted},
         }
-        await self.memory.append_event(self.session_id, event)
+        # R2: enqueue and return — the flusher drains to memoryd with
+        # retry/backoff. The media path never awaits memoryd here.
+        self.append_buffer.enqueue(event)
 
     async def _build_prompt(self, user_text: str) -> str:
         """S3-live-turns source: the durable transcript (mock LLM ignores
@@ -284,4 +291,8 @@ class Conversation:
         if self._responding is not None:
             self._responding.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
+        # Best-effort flush of queued events before closing (revoke path).
+        with contextlib.suppress(Exception):  # memoryd may be down at revoke
+            await self.append_buffer.flush()
+        await self.append_buffer.stop()
         await self.pc.close()

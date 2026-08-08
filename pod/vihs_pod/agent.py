@@ -79,11 +79,19 @@ class PodAgent:
 
     def health(self) -> dict[str, Any]:
         mode = "real" if self.real_stages else "mock"
+        convo = self._conversation
         return {
             "stages": {s: "ready" for s in STAGES},
             "stages_mode": mode,
             "fill": len(self._assignments),
             "cap": self.cap,
+            # R2 append buffer visibility (EP-007 M2): the chaos suite asserts
+            # depth rises while memoryd is paused, then drains to 0.
+            "append_buffer_depth": convo.append_buffer.depth if convo else 0,
+            "append_buffer_queued": convo.append_buffer.queued if convo else 0,
+            "append_buffer_in_flight": convo.append_buffer.in_flight if convo else 0,
+            "append_buffer_flusher_alive": convo.append_buffer.flusher_alive if convo else False,
+            "append_buffer_degraded": convo.append_buffer.degraded if convo else False,
         }
 
     async def signal_handler(self, conn: ServerConnection) -> None:
