@@ -35,6 +35,7 @@ impl TokenAuthorizer {
 impl Authorizer for TokenAuthorizer {
     async fn allow(&self, token: &str, verb: Verb) -> Result<Principal, OrchError> {
         if token.is_empty() {
+            crate::metrics::record_authz_denial();
             return Err(OrchError::Authz("missing token".into()));
         }
         let p = self.store.verify(token).await?;
@@ -44,6 +45,7 @@ impl Authorizer for TokenAuthorizer {
             Verb::Pod => p.scope == Scope::Pod,
         };
         if !ok {
+            crate::metrics::record_authz_denial();
             return Err(OrchError::Authz("scope not permitted for route".into()));
         }
         Ok(p)

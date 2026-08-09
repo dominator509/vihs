@@ -10,6 +10,7 @@ pub mod compact;
 pub mod config;
 pub mod error;
 pub mod index;
+pub mod metrics;
 pub mod rebuild;
 pub mod store;
 pub mod sweep;

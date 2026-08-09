@@ -20,6 +20,7 @@ fn pod(id: &str, state: PodPhase, cap: u32, fill: u32, ping_age: Duration) -> Po
         last_ping: now - ping_age,
         state,
         cooldown_until: None,
+        created_at: now,
     }
 }
 

@@ -107,16 +107,27 @@ async fn connect_session(
     headers: HeaderMap,
 ) -> Result<Response, OrchError> {
     let token = bearer(&headers).unwrap_or_default();
-    let principal = st.authz.allow(&token, Verb::Session).await?;
+    let principal = match st.authz.allow(&token, Verb::Session).await {
+        Ok(p) => p,
+        Err(e) => {
+            crate::metrics::record_resume("denied");
+            return Err(e);
+        }
+    };
     // SPEC-005 A5: resume ≤30/min per token → 429 rate_limited.
-    st.ratelimit.check(&rate_key(&token), RateClass::Resume)?;
+    if let Err(e) = st.ratelimit.check(&rate_key(&token), RateClass::Resume) {
+        crate::metrics::record_resume("denied");
+        return Err(e);
+    }
 
     // Owner check + session must exist (404, never 403).
-    let meta = st
-        .sessions
-        .get(&principal.owner, &session_id)
-        .await
-        .ok_or_else(|| OrchError::NotFound(session_id.clone()))?;
+    let meta = match st.sessions.get(&principal.owner, &session_id).await {
+        Some(m) => m,
+        None => {
+            crate::metrics::record_resume("denied");
+            return Err(OrchError::NotFound(session_id.clone()));
+        }
+    };
     let _ = meta.turns; // display cache only — resume derives from the durable cursor
 
     match router::assign(
@@ -130,6 +141,7 @@ async fn connect_session(
     .await
     {
         Ok(outcome) => {
+            crate::metrics::record_resume("ok");
             // Bind relay route so the client WS can reach the pod.
             st.relay
                 .bind(&outcome.connection_id, outcome.pod_id.as_str(), &session_id)
@@ -146,6 +158,7 @@ async fn connect_session(
             .into_response())
         }
         Err(OrchError::NoCapacity(_)) => {
+            crate::metrics::record_resume("error");
             let (queued, eta) = router::queued_eta(&*st.provider);
             st.queue
                 .enqueue(QueuedSession {
@@ -166,7 +179,10 @@ async fn connect_session(
             )
                 .into_response())
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            crate::metrics::record_resume("error");
+            Err(e)
+        }
     }
 }
 

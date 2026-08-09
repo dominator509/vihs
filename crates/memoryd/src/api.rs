@@ -97,6 +97,7 @@ async fn append_event(
 ) -> Result<Response, MemorydError> {
     let sid = SessionId(sid);
     let token = bearer(&headers).unwrap_or_default();
+    let started = std::time::Instant::now();
     let principal = st.authz.allow(&token, &sid, Verb::Append).await?;
     // Create-path owner binding (SPEC-005 A1): the orchestrator's
     // session-create appends a system note with the caller's user token.
@@ -125,7 +126,9 @@ async fn append_event(
         }
     }
     let handle = st.registry.get(&sid);
-    match handle.append(body).await? {
+    let res = handle.append(body).await;
+    crate::metrics::record_append_latency_ms(started.elapsed().as_secs_f64() * 1000.0);
+    match res? {
         AppendResult::Committed { hash, turn_id } => Ok((
             StatusCode::OK,
             Json(json!({"status": "committed", "hash": hash, "turn_id": turn_id})),
@@ -344,6 +347,7 @@ pub fn router(state: Arc<ApiState>) -> Router {
         .route("/v1/sessions/{sid}", axum::routing::delete(delete_session))
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(crate::metrics::metrics))
         .with_state(state)
 }
 

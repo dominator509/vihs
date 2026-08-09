@@ -160,6 +160,9 @@ pub async fn maybe_compact(sid: &SessionId, deps: &Deps) -> Result<Compacted, Me
     deps.store
         .put_artifact(sid, ARTIFACT_MEMORY, mem.as_bytes())
         .await?;
+    // Compaction happened: record blob tokens + epoch boundary (EP-008 M1;
+    // registry OBSERVABILITY.md; SPEC-007 O5 epoch-boundary annotations).
+    crate::metrics::record_compaction(estimate_tokens(&mem));
     Ok(Compacted::Done {
         epoch,
         blob_tokens: estimate_tokens(&mem),

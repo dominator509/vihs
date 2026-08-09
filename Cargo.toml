@@ -17,3 +17,4 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 argon2 = "0.5"
 base64 = "0.22"
 rand = "0.8"
+prometheus = { version = "0.14", default-features = false }

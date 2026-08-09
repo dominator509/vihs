@@ -48,6 +48,21 @@ impl TokenAuthorizer {
 #[async_trait::async_trait]
 impl Authorizer for TokenAuthorizer {
     async fn allow(&self, token: &str, sid: &SessionId, verb: Verb) -> Result<Principal, AuthzErr> {
+        let res = self.allow_inner(token, sid, verb).await;
+        if res.is_err() {
+            crate::metrics::record_authz_denial();
+        }
+        res
+    }
+}
+
+impl TokenAuthorizer {
+    async fn allow_inner(
+        &self,
+        token: &str,
+        sid: &SessionId,
+        verb: Verb,
+    ) -> Result<Principal, AuthzErr> {
         if token.is_empty() {
             return Err(AuthzErr::MissingToken);
         }

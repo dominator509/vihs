@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use axum::{
     extract::{ws::WebSocketUpgrade, Path, State},
-    response::IntoResponse,
     routing::get,
     Router,
 };
@@ -63,6 +62,12 @@ async fn scaler_loop(st: Arc<AppState>) {
             }
         }
         let pods = st.registry.snapshot();
+        // Publish pod-session gauges (EP-008 M1; registry OBSERVABILITY.md).
+        // Cold-start histogram records in registry::ready (the authoritative
+        // Booting→Ready transition point), not here.
+        for p in &pods {
+            orchestrator::metrics::record_pod_sessions(p.id.as_str(), p.fill);
+        }
         let view = FleetView {
             pods,
             queue_len: st.queue.len().await,
@@ -85,6 +90,7 @@ async fn scaler_loop(st: Arc<AppState>) {
                         };
                         match st.provider.deploy(&spec).await {
                             Ok(id) => {
+                                orchestrator::metrics::record_scale_event("up");
                                 st.registry.register(
                                     &id,
                                     "127.0.0.1:0".to_string(),
@@ -107,12 +113,14 @@ async fn scaler_loop(st: Arc<AppState>) {
                 }
                 ScaleAction::Terminate(id) => {
                     if st.provider.terminate(id).await.is_ok() {
+                        orchestrator::metrics::record_scale_event("down");
                         st.registry.remove(id);
                         decisions.push(serde_json::json!({"t":"terminate","pod":id.as_str()}));
                     }
                 }
                 ScaleAction::Replace(id) => {
                     if st.provider.terminate(id).await.is_ok() {
+                        orchestrator::metrics::record_scale_event("replace");
                         st.registry.remove(id);
                     }
                     let spec = orchestrator::provider::PodSpec {
@@ -151,34 +159,15 @@ async fn ws_signal(
 }
 
 fn app(state: Arc<AppState>) -> Router {
-    // SPEC-006 "Redis down: memoryd/orchestrator fail readyz" (EP-007 M3):
-    // readyz pings the token store's Redis; healthz stays pure liveness.
-    let readyz_state = state.clone();
     Router::new()
         .merge(public_routes())
         .merge(admin_routes())
         .merge(internal_routes())
         .merge(client_routes())
         .route("/v1/signal/{connection_id}", get(ws_signal))
-        .route("/healthz", get(|| async { "ok" }))
-        .route(
-            "/readyz",
-            get(move || {
-                let st = readyz_state.clone();
-                async move {
-                    match st.tokens.ping().await {
-                        Ok(()) => (axum::http::StatusCode::OK, "ok").into_response(),
-                        Err(e) => (
-                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                            axum::Json(serde_json::json!({
-                                "error": {"code": "unavailable", "message": e.to_string(), "retryable": true}
-                            })),
-                        )
-                            .into_response(),
-                    }
-                }
-            }),
-        )
+        .route("/healthz", get(orchestrator::metrics::healthz))
+        .route("/readyz", get(orchestrator::metrics::readyz))
+        .route("/metrics", get(orchestrator::metrics::metrics))
         .with_state(state)
 }
 
@@ -211,7 +200,9 @@ async fn main() {
             .expect("serve public");
     });
 
-    let admin_app = admin_routes().with_state(state.clone());
+    let admin_app = admin_routes()
+        .route("/metrics", get(orchestrator::metrics::metrics))
+        .with_state(state.clone());
     let admin_listener = tokio::net::TcpListener::bind(&cfg.admin_addr)
         .await
         .expect("bind admin");

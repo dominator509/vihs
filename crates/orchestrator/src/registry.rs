@@ -38,6 +38,8 @@ pub struct PodState {
     pub last_ping: Instant,
     pub state: PodPhase,
     pub cooldown_until: Option<Instant>,
+    /// Registration instant — cold-start metric anchor (EP-008 M1).
+    pub created_at: Instant,
 }
 
 impl PodState {
@@ -84,6 +86,7 @@ impl PodRegistry {
             last_ping: now,
             state: PodPhase::Booting,
             cooldown_until: None,
+            created_at: now,
         };
         self.pods.insert(id.as_str().to_string(), state.clone());
         let mut order = self.order.write().expect("registry lock");
@@ -92,6 +95,14 @@ impl PodRegistry {
 
     pub fn ready(&self, id: &PodId) {
         if let Some(mut p) = self.pods.get_mut(id.as_str()) {
+            if p.state != PodPhase::Ready {
+                // Booting→Ready transition: record the cold-start duration
+                // (EP-008 M1; registry OBSERVABILITY.md `vihs_cold_start_secs`).
+                crate::metrics::record_cold_start(
+                    id.as_str(),
+                    p.created_at.elapsed().as_secs_f64(),
+                );
+            }
             p.state = PodPhase::Ready;
             p.last_ping = Instant::now();
             let snap = p.clone();

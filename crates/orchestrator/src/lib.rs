@@ -12,6 +12,7 @@ pub mod client_static;
 pub mod config;
 pub mod error;
 pub mod memoryd_client;
+pub mod metrics;
 pub mod provider;
 pub mod provider_mock;
 pub mod queue;
