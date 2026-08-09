@@ -16,8 +16,23 @@ case "${1:-up}" in
     done
     docker compose -f "$F" run --rm mc mb -p "local/${VIHS_S3_BUCKET:-vihs-sessions}" >/dev/null 2>&1 || true
     ;;
-  up-obs) docker compose -f "$F" --profile obs up -d ;;
+  up-obs)
+    docker compose -f "$F" --profile obs up -d
+    i=0
+    until curl -sf http://127.0.0.1:${VIHS_OBS_PROM_PORT:-9090}/api/v1/targets >/dev/null 2>&1; do
+      i=$((i+1)); [ "$i" -gt 30 ] && { echo "dev-services: prometheus not ready" >&2; exit 1; }
+      sleep 1
+    done
+    i=0
+    until curl -sf http://127.0.0.1:${VIHS_OBS_GRAFANA_PORT:-3100}/api/health >/dev/null 2>&1; do
+      i=$((i+1)); [ "$i" -gt 30 ] && { echo "dev-services: grafana not ready" >&2; exit 1; }
+      sleep 1
+    done
+    ;;
+  down-obs)
+    docker compose -f "$F" --profile obs down
+    ;;
   down) docker compose -f "$F" down -v ;;
-  *) echo "usage: dev-services.sh up|down|up-obs" >&2; exit 2 ;;
+  *) echo "usage: dev-services.sh up|down|up-obs|down-obs" >&2; exit 2 ;;
 esac
 echo "DEV-SERVICES OK"

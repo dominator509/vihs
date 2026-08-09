@@ -1,0 +1,21 @@
+# VIHS Prometheus scrape config (EP-008 M3, dev profile).
+# The obs compose profile runs prometheus with network_mode: host, so it
+# scrapes the local exporters on 127.0.0.1 (orchestrator :8080, memoryd
+# :8091, pod :8093 — see ENVIRONMENT.md).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: orchestrator
+    static_configs:
+      - targets: ["127.0.0.1:8080"]
+  - job_name: memoryd
+    static_configs:
+      - targets: ["127.0.0.1:8091"]
+  - job_name: pod
+    static_configs:
+      - targets: ["127.0.0.1:8093"]

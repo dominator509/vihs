@@ -1,0 +1,51 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "title": "barge-in rate",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "sum(rate(vihs_bargein_total[5m])) by (pod_id)",
+          "legendFormat": "{{pod_id}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "title": "abort-flush p95 (ms)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vihs_abort_flush_ms_bucket[5m])) by (le, pod_id))",
+          "legendFormat": "p95 {{pod_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 100}]}
+        }
+      }
+    },
+    {
+      "title": "endpoint-premature events",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(rate(vihs_endpoint_premature_total[5m])) by (pod_id)",
+          "legendFormat": "{{pod_id}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "VIHS Turn-taking",
+  "uid": "vihs-turn-taking",
+  "version": 1
+}

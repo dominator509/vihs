@@ -248,7 +248,8 @@ milestone; re-run that milestone's validation command before continuing.
 Re-runnable.
 - [x] M1 — control-plane metrics + readyz matrix (orchestrator 2 new tests, memoryd 1 new test; live scrape + e2e traffic verified)
 - [x] M2 — pod metrics incl. cache-ratio poller + epoch annotations (2 render tests + 1 surface test; pod suite 84; ruff+mypy clean)
-- [ ] M3  - [ ] M4
+- [x] M3 — dashboards + alert rules as code (5 dashboards + 6 rules; promtool valid; up-obs/down-obs with health-wait; targets up incl. live pod probe; grafana /api/health ok)
+- [ ] M4
 
 ## 13. Surprises & Discoveries
 - prometheus 0.14 API differs from 0.13: `TextEncoder::encode_to_string` (not
@@ -272,6 +273,17 @@ Re-runnable.
   TurnFSM (which emits COUNT_NEAR_MISS) is test-only; the mock pipeline
   bypasses it. The counter renders (0) and the real STT driver records it when
   real stages land (EP-009). Documented, not faked.
+- Grafana failed to start on :3000 — the AXIOM egress-plane already owns that
+  port on this host. Default moved to 3100 (VIHS_OBS_GRAFANA_PORT); dev
+  machines commonly collide on 3000.
+- Grafana provisioning scans SUBDIRECTORIES under the provisioning mount
+  (datasources/, dashboards/, alerting/) — the first draft put the yml files
+  at the mount root and grafana logged "can't read datasources/dashboards".
+  Restructured into datasources/ + dashboards/ subdirs.
+- Obs stack targets: pod target reads "down" whenever no pod process is
+  running (e2e harness tears its pod down). Proven live with a probe pod
+  (target -> up, 3 histogram series scraped), then torn down — the target
+  state is honest, not masked.
 
 ## 14. Decision Log
 - prometheus = 0.14 pinned in workspace deps (AGENTS.md §8: necessary for a
@@ -287,5 +299,7 @@ Re-runnable.
   stats poller deferred to EP-009 (documented in code + ENVIRONMENT.md).
 
 ## 15. Outcomes & Retrospective
-- M1 commit: (pending — fill after commit)
-- Remaining gaps: pod metrics (M2), dashboards/alerts/compose (M3), smoke presence + runbooks (M4).
+- M1 commit: 419a804 (control-plane metrics + readyz matrix)
+- M2 commit: ebe8c97 (pod metrics incl. cache-ratio poller + epoch annotations)
+- M3 commit: (pending — fill after commit)
+- Remaining gaps: smoke presence + runbooks (M4).

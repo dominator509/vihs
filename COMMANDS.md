@@ -25,6 +25,7 @@ row says otherwise. Package managers: `cargo` (Rust workspace), `pip` inside
 | Full verification | `sh scripts/verify.sh` | `VERIFY OK` (runs all of the above in order) |
 | Production readiness | `sh scripts/production-readiness-check.sh` | `PROD-READY OK` |
 | Local dev services | `sh scripts/dev-services.sh up` / `down` | `DEV-SERVICES OK` (Redis 7 + MinIO via docker compose) |
+| Observability stack (dev) | `sh scripts/dev-services.sh up-obs` / `down-obs` | prometheus :9090 + grafana :3100 (EP-008 M3); waits for both health endpoints |
 | Local start (control plane) | `cargo run -p orchestrator` and `cargo run -p memoryd` | listening logs on :8080 / :8091 |
 | Local start (pod, mock stages) | `pod/.venv/bin/python -m vihs_pod.agent --mock-gpu` | `pod ready` log |
 | Chain fsck (event-log integrity) | `cargo run -p vihs-core --bin chain-fsck -- <events.jsonl>` | `CHAIN OK <n> events` |

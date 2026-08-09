@@ -23,6 +23,23 @@ local Redis/MinIO (dev only — forbidden pattern anywhere else).
 | Cold starts >30 s | volume mount slow / snapshot cold | check provider volume health; verify warm-pool floor honored |
 | TURN-only users failing | coturn creds/ports | validate TURN_URL creds; check 3478/49152+ range open |
 
+## Alert → runbook anchors (EP-008 M3)
+Each alert rule in deploy/observability/alerts.yml maps to failure-mode rows
+above; full runbook text lands in M4.
+
+- `VIHS_E2E_P95_TOO_HIGH` (e2e p95 first-audio > 2000 ms, 10 min) → row 1
+  (first-audio latency spike) + row 5 (cold starts).
+- `VIHS_ABORT_FLUSH_P95_TOO_HIGH` (abort_flush p95 > 100 ms, 10 min) → row 3
+  (appends buffering / memoryd slow) — barge-in feel is the user-facing signal.
+- `VIHS_PREFIX_CACHE_RATIO_DROPPED` (ratio < 0.9, 15 min) → INV-4 drift; check
+  vLLM prefix cache + VIHS_VLLM_STATS_URL poller (EP-009 real mode).
+- `VIHS_APPEND_BUFFER_DEPTH_HIGH` (depth > 32 on any pod) → row 3 (memoryd
+  trouble): restart memoryd, writers replay tips from log.
+- `VIHS_RESUME_DENIED_SPIKE` (>10 denied/min) → security review; see Incident
+  triage SEV1 (wrong-owner access).
+- `VIHS_REPLACEMENT_LOOP` (pod replacements 3×) → row 2 (pod crash loop):
+  drain, verify resume-success metric, check capacity/volume health.
+
 ## Database backup/restore
 Object store IS the database. Backups: bucket replication/snapshot per
 operator infra (documented target: daily snapshot, 7-day retain in stage,

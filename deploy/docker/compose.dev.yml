@@ -1,5 +1,7 @@
 # VIHS local dev services — Redis 7 + MinIO + bucket init.
 # Idempotent: `dev-services.sh up` may be re-run freely.
+# Observability stack (prometheus + grafana) behind the `obs` profile —
+# `dev-services.sh up-obs`; dev only (EP-008 M3).
 services:
   redis:
     image: redis:7-alpine
@@ -39,3 +41,31 @@ services:
     depends_on:
       minio:
         condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: ["obs"]
+    network_mode: host
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.listen-address=127.0.0.1:${VIHS_OBS_PROM_PORT:-9090}
+    volumes:
+      - ./../observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./../observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    profiles: ["obs"]
+    network_mode: host
+    environment:
+      GF_SERVER_HTTP_ADDR: 127.0.0.1
+      GF_SERVER_HTTP_PORT: ${VIHS_OBS_GRAFANA_PORT:-3100}
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    volumes:
+      - ./../observability/grafana-provisioning:/etc/grafana/provisioning:ro
+      - ./../observability/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus

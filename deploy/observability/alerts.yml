@@ -1,0 +1,71 @@
+# VIHS alert rules (EP-008 M3; OBSERVABILITY.md Alerts section).
+# Thresholds initial per registry; tune in operations. Every rule names a
+# runbook anchor (OPERATIONS.md "Alert runbooks").
+groups:
+  - name: vihs-latency
+    rules:
+      - alert: VIHS_E2E_P95_TOO_HIGH
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(vihs_e2e_first_audio_ms_bucket[5m])) by (le, pod_id, model_ver)
+          ) > 2000
+        for: 10m
+        labels:
+          severity: page
+          runbook: first-audio-latency-spike
+        annotations:
+          summary: "e2e first-audio p95 > 2000ms on {{ $labels.pod_id }}"
+      - alert: VIHS_ABORT_FLUSH_P95_TOO_HIGH
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(vihs_abort_flush_ms_bucket[5m])) by (le, pod_id, model_ver)
+          ) > 100
+        for: 10m
+        labels:
+          severity: page
+          runbook: abort-flush-over-budget
+        annotations:
+          summary: "abort-flush p95 > 100ms (barge-in feel degraded)"
+
+  - name: vihs-memory
+    rules:
+      - alert: VIHS_PREFIX_CACHE_RATIO_DROPPED
+        expr: vihs_prefix_cache_hit_ratio < 0.9
+        for: 15m
+        labels:
+          severity: ticket
+          runbook: prefix-cache-ratio-drift
+        annotations:
+          summary: "LLM prefix-cache hit ratio below 0.9 (INV-4 drift)"
+      - alert: VIHS_APPEND_BUFFER_DEPTH_HIGH
+        expr: vihs_append_buffer_depth > 32
+        for: 1m
+        labels:
+          severity: page
+          runbook: append-buffer-full
+        annotations:
+          summary: "append buffer depth > 32 on {{ $labels.pod_id }}"
+
+  - name: vihs-security
+    rules:
+      - alert: VIHS_RESUME_DENIED_SPIKE
+        expr: |
+          sum(rate(vihs_resume_total{result="denied"}[5m])) * 60 > 10
+        for: 2m
+        labels:
+          severity: ticket
+          runbook: resume-denied-spike
+        annotations:
+          summary: "resume denials > 10/min — security review"
+
+  - name: vihs-fleet
+    rules:
+      - alert: VIHS_REPLACEMENT_LOOP
+        expr: |
+          sum(increase(vihs_scale_events_total{dir="replace"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: page
+          runbook: pod-replacement-loop
+        annotations:
+          summary: "3+ pod replacements in 15m — pods not stabilizing"

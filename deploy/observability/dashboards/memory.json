@@ -1,0 +1,92 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "title": "append latency p50/p95 (ms)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(vihs_append_latency_ms_bucket[5m])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vihs_append_latency_ms_bucket[5m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ms"}}
+    },
+    {
+      "title": "append buffer depth",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "max(vihs_append_buffer_depth) by (pod_id)",
+          "legendFormat": "{{pod_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 32}]}
+        }
+      }
+    },
+    {
+      "title": "prefix-cache hit ratio",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "vihs_prefix_cache_hit_ratio",
+          "legendFormat": "{{pod_id}} {{model_ver}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 1,
+          "min": 0,
+          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 0.9}]}
+        }
+      }
+    },
+    {
+      "title": "memory blob tokens + compactions",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "vihs_memory_blob_tokens",
+          "legendFormat": "blob tokens"
+        },
+        {
+          "expr": "sum(increase(vihs_compactions_total[5m]))",
+          "legendFormat": "compactions/5m"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "epoch boundaries",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "targets": [
+        {
+          "expr": "sum(rate(vihs_epoch_boundary_total[5m])) by (pod_id)",
+          "legendFormat": "pod {{pod_id}}"
+        },
+        {
+          "expr": "sum(rate(vihs_epoch_boundary_total[5m]))",
+          "legendFormat": "memoryd total"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "VIHS Memory",
+  "uid": "vihs-memory",
+  "version": 1
+}

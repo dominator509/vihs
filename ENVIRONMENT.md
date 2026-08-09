@@ -50,6 +50,8 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_MODEL_VER | no | all | mock | N | pod metric label `model_ver` (SPEC-007 O1; EP-008 M2) | short string |
 | VIHS_MOCK_CACHE_RATIO | no | dev | 0.95 | N | mock LLM prefix-cache hit ratio gauge (SPEC-007 O5; EP-008 M2). Real mode polls VIHS_VLLM_STATS_URL (EP-009) | float 0..1 |
 | VIHS_VLLM_STATS_URL | no | prod | (unset) | N | vLLM stats endpoint for the prefix-cache poller (real mode; EP-009) | http URL |
+| VIHS_OBS_PROM_PORT | no | dev | 9090 | N | prometheus listen port in the `obs` compose profile (EP-008 M3) | tcp port |
+| VIHS_OBS_GRAFANA_PORT | no | dev | 3100 | N | grafana listen port in the `obs` compose profile (EP-008 M3). Default 3100 because 3000 is commonly taken by other host services | tcp port |
 | TURN_URL / TURN_USER / TURN_PASS | no | stage,prod | turn:host:3478 | S(creds) | coturn relay | set together |
 | RUST_LOG / VIHS_POD_LOG | no | all | info | N | log levels | valid filter |
 | VIHS_CLIENT_DIR | no | dev | client/ | N | serve client HTML/JS from this dir instead of the embedded copy (EP-006 M5 dev override) | dir containing index.html + session.js |

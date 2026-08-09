@@ -1,0 +1,65 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "panels": [
+    {
+      "title": "pod sessions fill vs cap",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "targets": [
+        {
+          "expr": "max(vihs_pod_sessions) by (pod_id)",
+          "legendFormat": "fill {{pod_id}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}}
+    },
+    {
+      "title": "cold start (seconds)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(vihs_cold_start_secs_bucket[10m])) by (le))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 30}]}
+        }
+      }
+    },
+    {
+      "title": "scale events (up/down/replace)",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "targets": [
+        {
+          "expr": "sum(increase(vihs_scale_events_total[5m])) by (dir)",
+          "legendFormat": "{{dir}}"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "ops"}}
+    },
+    {
+      "title": "gpu utilization",
+      "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "targets": [
+        {
+          "expr": "max(vihs_gpu_util) by (pod_id)",
+          "legendFormat": "{{pod_id}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {"max": 1, "min": 0, "unit": "percentunit"}
+      }
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "VIHS Fleet",
+  "uid": "vihs-fleet",
+  "version": 1
+}
