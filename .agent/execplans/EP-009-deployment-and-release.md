@@ -110,4 +110,24 @@ Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
   `RUNPOD_API_KEY` secret configured and the M4 deploy script present — honest
   placeholder until M4 wires the real deploy.
 - M3: CHANGELOG.md bootstrapped with the Unreleased section covering M1–M2.
+- M4 (honest blockers, logged before spending):
+  - **smoke-test.sh `--base-url` is accept+ignore** (`run_e2e.py` line 618:
+    "Remote-target form is not used by local verify; accept+ignore"). Pointing
+    the smoke at staging would silently test the LOCAL stack — the plan's own
+    M4 validation command does not currently exercise staging. Gap: wire the
+    remote path (target staging orchestrator, use the pod registered there).
+  - **Real-stage deps NOT in the image or lock**: `faster_whisper` (STT),
+    `piper-tts` (TTS), `vllm` (LLM) are absent from `pod/requirements.lock`
+    and `deploy/docker/pod.Dockerfile`. The built image can only run MOCK
+    stages. A "real-stage smoke" needs these deps + model weights.
+  - **No RunPod network volume**: `GET /v2/network-volumes` →
+    `{"networkVolumes":[]}`. Real stages mount weights at
+    `/workspace/models` (VOLUME.md layout); nothing exists to mount.
+  - **No container registry with the image**: repo `dominator509/vihs` does
+    not exist on GitHub (verified via gh) → no GHCR target; no Docker Hub
+    creds. RunPod cannot pull `vihs-pod:478a6f6` from anywhere yet.
+  - Orchestrator public reachability is fine: binds `0.0.0.0:8080` on public
+    IP 66.94.123.250.
+  - Deploy-side artifacts that ARE unblocked are committed (76d7bf4): RunPod
+    template.json, VOLUME.md layout, systemd units, INSTALL.md.
 ## 15. Outcomes & Retrospective
