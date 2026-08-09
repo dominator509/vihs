@@ -356,7 +356,7 @@ Re-runnable.
 - M1 commit: 419a804 (control-plane metrics + readyz matrix)
 - M2 commit: ebe8c97 (pod metrics incl. cache-ratio poller + epoch annotations)
 - M3 commit: 6305951 (dashboards + alert rules as code)
-- M4 commit: (pending — fill after commit)
+- M4 commit: e967b58 (metric-presence smoke + Redis connection hardening)
 - Remaining gaps: none in EP-008 — SPEC-007 acceptance covered by smoke
   (metric presence), alerts loaded, runbook links. Staging soak (cache ratio
   ≥0.9) is post-launch (no staging env in repo).
