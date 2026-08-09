@@ -1,0 +1,25 @@
+[Unit]
+Description=VIHS memoryd — session memory writer (control plane)
+Documentation=file:///opt/vihs/DEPLOYMENT.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vihs
+EnvironmentFile=/opt/vihs/.env
+# Load env twice: EnvironmentFile cannot expand vars; the runtime reads
+# VIHS_* directly from the process env (config.rs from_env).
+ExecStart=/opt/vihs/target/release/memoryd
+Restart=on-failure
+RestartSec=3
+# memoryd is the single writer (ADR-005) — never start two copies.
+# Standard security hardening for a network-facing service.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

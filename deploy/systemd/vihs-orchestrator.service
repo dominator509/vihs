@@ -1,0 +1,21 @@
+[Unit]
+Description=VIHS orchestrator — control plane API + router + scaler
+Documentation=file:///opt/vihs/DEPLOYMENT.md
+After=network-online.target vihs-memoryd.service docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vihs
+EnvironmentFile=/opt/vihs/.env
+ExecStart=/opt/vihs/target/release/orchestrator
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

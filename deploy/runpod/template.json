@@ -1,0 +1,29 @@
+{
+  "name": "vihs-pod",
+  "description": "VIHS data-plane pod (EP-009). Weights come from the network volume at /workspace/models; the image only carries runtime code + deps.",
+  "image": "ghcr.io/dominator509/vihs/vihs-pod:latest",
+  "gpu": {
+    "id": "RTX4090",
+    "count": 1
+  },
+  "cloud": "SECURE",
+  "env": {
+    "VIHS_POD_ID": "template-pod",
+    "POD_MAX_SESSIONS": "2",
+    "VIHS_REAL_STAGES": "1",
+    "VIHS_MODEL_DIR": "/workspace/models",
+    "VIHS_LLM_URL": "http://127.0.0.1:8000/v1"
+  },
+  "mounts": {
+    "network": [
+      {
+        "volumeId": "vihs-models",
+        "path": "/workspace/models"
+      }
+    ]
+  },
+  "ports": [
+    "8093/http"
+  ],
+  "disk": 20
+}
