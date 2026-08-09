@@ -115,7 +115,12 @@ def build_stages(
         llm_url = os.environ.get("VIHS_LLM_URL", "http://127.0.0.1:8000/v1")
         llm_token = os.environ.get("VIHS_LLM_TOKEN", "")
         if provider == "axiom-gateway":
-            llm: Any = AxiomGatewayLLM(url=llm_url, token=llm_token)
+            llm: Any = AxiomGatewayLLM(
+                url=llm_url,
+                token=llm_token,
+                provider=os.environ.get("VIHS_LLM_PROVIDER", "") or None,
+                verify=os.environ.get("VIHS_LLM_TLS_VERIFY", "1") != "0",
+            )
         elif provider == "vllm":
             llm = VLLMLLM(url=llm_url, token=llm_token or None)
         else:
@@ -377,7 +382,7 @@ class Conversation:
         # retry/backoff. The media path never awaits memoryd here.
         self.append_buffer.enqueue(event)
 
-    async def _append_note(self, kind: str, meta: dict) -> None:
+    async def _append_note(self, kind: str, meta: dict[str, object]) -> None:
         """System note event (SPEC-006 row 1): `kind:note`, NO user text.
 
         The `stage_error` note records the failure for the durable log

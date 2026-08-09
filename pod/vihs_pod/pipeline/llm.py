@@ -41,6 +41,8 @@ class AxiomGatewayLLM:
         policy: str = "latency",
         egress: bool = True,
         timeout: float = 30.0,
+        provider: str | None = None,
+        verify: bool = True,
     ) -> None:
         self.url = url.rstrip("/")
         self.token = token
@@ -48,6 +50,8 @@ class AxiomGatewayLLM:
         self.policy = policy
         self.egress = egress
         self.timeout = timeout
+        self.provider = provider
+        self.verify = verify
 
     async def stream(self, prompt: str) -> AsyncIterator[str]:
         import httpx
@@ -62,9 +66,11 @@ class AxiomGatewayLLM:
         }
         if self.model is not None:
             body["model"] = self.model
+        if self.provider is not None:
+            body["provider"] = self.provider
 
         async with (
-            httpx.AsyncClient(timeout=self.timeout) as client,
+            httpx.AsyncClient(timeout=self.timeout, verify=self.verify) as client,
             client.stream("POST", url, json=body, headers=headers) as resp,
         ):
             if resp.status_code != 200:

@@ -48,6 +48,9 @@ def main() -> int:
     image = env.get("VIHS_RUNPOD_IMAGE", "ghcr.io/dominator509/vihs/vihs-pod:latest")
     volume_id = env.get("VIHS_RUNPOD_VOLUME", "")
     orch = env.get("VIHS_ORCH_ADDR", "")
+    # Local face for polling/smoke from this box: the orchestrator binds
+    # 0.0.0.0, so 127.0.0.1 works locally without the public-IP hairpin.
+    orch_local = env.get("VIHS_ORCH_LOCAL_ADDR", orch)
     pod_token = env.get("VIHS_POD_TOKEN", "")
     llm_url = env.get("VIHS_LLM_URL", "")
     llm_token = env.get("VIHS_LLM_TOKEN", "")
@@ -56,6 +59,12 @@ def main() -> int:
 
     if not api_key or not orch or not pod_token:
         print("deploy: missing RUNPOD_API_KEY / VIHS_ORCH_ADDR / VIHS_POD_TOKEN", file=sys.stderr)
+        return 1
+    if not env.get("VIHS_MEMORYD_PUBLIC_ADDR"):
+        print(
+            "deploy: VIHS_MEMORYD_PUBLIC_ADDR unset — pod cannot reach memoryd",
+            file=sys.stderr,
+        )
         return 1
 
     scheme = "B" + "earer"
@@ -82,8 +91,14 @@ def main() -> int:
         "VIHS_POD_ID": "staging-4090",
         "POD_MAX_SESSIONS": env.get("POD_MAX_SESSIONS", "2"),
         "VIHS_REAL_STAGES": "1",
+        # Real LLM: AXIOM gateway provider (ADR-012). Without this the pod
+        # falls back to the scripted mock LLM.
+        "PROVIDER": "axiom-gateway",
         "VIHS_MODEL_DIR": VOLUME_DIR,
         "VIHS_ORCH_ADDR": orch,
+        # Pod talks to memoryd DIRECTLY (MemoryClient) — must be a public
+        # addr reachable from the RunPod pod, not loopback.
+        "VIHS_MEMORYD_ADDR": env.get("VIHS_MEMORYD_PUBLIC_ADDR", ""),
         "VIHS_POD_TOKEN": pod_token,
         "VIHS_STT_DEVICE": "cuda",
         "VIHS_STT_COMPUTE": "float16",
@@ -94,6 +109,11 @@ def main() -> int:
         pod_env["VIHS_LLM_URL"] = llm_url
     if llm_token:
         pod_env["VIHS_LLM_TOKEN"] = llm_token
+    llm_provider = env.get("VIHS_LLM_PROVIDER", "")
+    if llm_provider:
+        pod_env["VIHS_LLM_PROVIDER"] = llm_provider
+    if env.get("VIHS_LLM_TLS_VERIFY", "1") == "0":
+        pod_env["VIHS_LLM_TLS_VERIFY"] = "0"
 
     # 1. Create the pod in the volume's DC with the GHCR image + volume mount.
     body: dict = {
@@ -117,8 +137,10 @@ def main() -> int:
 
     try:
         # 2. Wait for the pod's public address (runtime appears when running).
+        #    Image pull from GHCR can take 10-20 min on RunPod (observed), so
+        #    the deadline covers pull + boot, not just boot.
         pod_addr: str | None = None
-        deadline = time.monotonic() + 300
+        deadline = time.monotonic() + 1500
         while time.monotonic() < deadline:
             code, resp = api("GET", f"/v2/pods/{pod_id}")
             runtime = resp.get("runtime") or {}
@@ -138,12 +160,12 @@ def main() -> int:
 
         # 3. Wait for orchestrator to mark it Ready (registration + assign WS).
         admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
-        ready_deadline = time.monotonic() + 300
+        ready_deadline = time.monotonic() + 1500
         ready = False
         while time.monotonic() < ready_deadline:
             try:
                 req = urllib.request.Request(
-                    f"http://{orch}/admin/pods",
+                    f"http://{orch_local}/admin/pods",
                     headers={hname: scheme + " " + admin_tok},
                 )
                 with urllib.request.urlopen(req, timeout=5.0) as r:
@@ -163,7 +185,38 @@ def main() -> int:
             return 1
         print(f"deploy: pod READY cold_start={cold_start_s}s addr={pod_addr}")
 
-        # 4. Hand back to the caller (remote smoke runs next).
+        # 4. Remote smoke while the pod is alive: one turn + resume through
+        #    the real relay, asserting the DURABLE transcript (real LLM via
+        #    AXIOM gateway → piper TTS → mux). Pod is terminated in finally.
+        smoke_py = env.get(
+            "VIHS_SMOKE_PY", str(ROOT / "pod" / ".venv" / "bin" / "python")
+        )
+        smoke_script = ROOT / "tests" / "e2e" / "run_e2e.py"
+        smoke_out = env.get("VIHS_EVIDENCE_DIR", str(ROOT / "ep009-evidence"))
+        os.makedirs(smoke_out, exist_ok=True)
+        smoke_cmd = [
+            smoke_py,
+            str(smoke_script),
+            "--remote-smoke",
+            "--base-url",
+            f"http://{orch_local}",
+            "--metrics-out",
+            smoke_out,
+        ]
+        print("deploy: running remote smoke:", " ".join(smoke_cmd))
+        smoke = subprocess.run(
+            smoke_cmd, cwd=ROOT, capture_output=True, text=True, timeout=480
+        )
+        if smoke.stdout:
+            print(smoke.stdout[-3000:])
+        if smoke.stderr:
+            print("smoke stderr:", smoke.stderr[-1500:])
+        if smoke.returncode != 0:
+            print(f"deploy: SMOKE_FAILED rc={smoke.returncode}", file=sys.stderr)
+            return 2
+        print("deploy: SMOKE_OK")
+
+        # 5. Hand back to the caller.
         print(f"READY_ADDR={pod_addr}")
         print(f"COLD_START_S={cold_start_s}")
         return 0
