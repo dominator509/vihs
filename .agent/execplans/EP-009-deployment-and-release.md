@@ -131,3 +131,20 @@ Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
   - Deploy-side artifacts that ARE unblocked are committed (76d7bf4): RunPod
     template.json, VOLUME.md layout, systemd units, INSTALL.md.
 ## 15. Outcomes & Retrospective
+M1–M3 complete (`ab817d5`, `e5bffb9`); M4 deploy artifacts committed
+(`76d7bf4`, `c51c287`) — RunPod template, VOLUME.md, systemd units, INSTALL.md,
+honest blocker log. Registry unblocked: `dominator509/vihs` private repo created
+via gh (same pattern as the private axiom repo), pod image pushed to GHCR
+(`ghcr.io/dominator509/vihs/vihs-pod:478a6f6`, digest `a9ba6b3b…`).
+M4 remaining (needs operator decisions, see Surprises):
+1. Real-stage smoke requires model weights + real-stage deps — the built image
+   has mock stages only (faster_whisper/piper/vllm absent from lock+Dockerfile),
+   and `GET /v2/network-volumes` returns `[]`. Which models / sizes to provision,
+   and does the operator supply them?
+2. smoke harness remote mode — `--base-url` is accept+ignore; wiring it to
+   target a remote orchestrator + remote pod is in-scope M4 code.
+3. Staging pod addressing — driver does not set VIHS_POD_ADDR; a RunPod pod must
+   advertise a publicly reachable addr (via VIHS_RUNPOD_ENV post-create), or the
+   orchestrator's pod-ward signal WS cannot connect. Deploy script needs the
+   create → read runtime IP → set env → restart cycle.
+STOP S1 holds on model weights until decided.
