@@ -6,3 +6,4 @@ aiortc==1.15.0
 av==17.1.0
 websockets==17.0.1
 numpy==2.5.1
+httpx==0.28.1

@@ -41,6 +41,12 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | COMPACT_TOKEN_BUDGET | no | all | 3000 | N | memory.md token ceiling triggering compaction | int |
 | RUNPOD_API_KEY | prod deploy only | prod | (secret) | S | provider driver | present when PROVIDER=runpod |
 | PROVIDER | yes | all | mock | N | pod provider driver | mock|runpod |
+| VIHS_RUNPOD_IMAGE | no | stage,prod | vihs-pod:latest | N | pod image reference (EP-009 M2) | docker image ref |
+| VIHS_RUNPOD_VOLUME_ID | no | stage,prod | (unset) | N | network volume id mounted at VIHS_MODEL_DIR (EP-009 M2) | RunPod volume id |
+| VIHS_RUNPOD_REGION | no | stage,prod | (unset) | N | preferred data center id for pod placement (EP-009 M2) | data center id |
+| VIHS_RUNPOD_CLOUD | no | stage,prod | SECURE | N | RunPod cloud tier (EP-009 M2) | SECURE\|COMMUNITY\|ANY |
+| VIHS_RUNPOD_API_URL | no | test | https://api.runpod.io | N | RunPod API base (fixture override in driver tests; EP-009 M2) | https URL |
+| VIHS_RUNPOD_ENV | no | stage,prod | (unset) | N | JSON object merged into pod container env (EP-009 M2) | JSON object |
 | VIHS_MODEL_DIR | pod | all | /workspace/models | N | network-volume mount | dir exists on pod |
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat endpoint | reachable in real mode |
 | VIHS_REAL_STAGES | no | dev | 0 | N | 1 = real GPU stages | 0/1 |

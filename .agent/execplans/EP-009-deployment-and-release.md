@@ -60,9 +60,39 @@ steps executed as written (doc bugs fixed in the same plan).
 (re-runnable as stated)
 
 ## 12. Progress
-Deploys are re-runnable; staging sessions cleaned. - [ ] M1 - [ ] M2 - [ ] M3
+Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [ ] M3
 - [ ] M4 - [ ] M5
 
 ## 13. Surprises & Discoveries
+- M1: `nvidia/cuda:12.4.1-base-ubuntu24.04` does not exist on Docker Hub; the
+  12.4.1 line tops out at ubuntu22.04. Used `12.9.2-base-ubuntu24.04` (verified
+  via Docker Hub tags API) — Ubuntu 24.04 ships Python 3.12, matching the pod's
+  `requires-python >=3.11` and mypy `python_version = 3.12`.
+- M1: `httpx==0.28.1` is a direct runtime dependency (agent.py, memory_client.py
+  import it at module level) but was MISSING from pod/requirements.lock — a
+  fresh venv from the lock would crash the pod at import. Added to the lock.
+- M1: runtime deps are installed in the image as an explicit pinned set
+  (aiortc/av/websockets/numpy/httpx) — dev tools (pytest/mypy/ruff) stay out of
+  the container.
+- M2: driver fixture tests use a local axum fake on an ephemeral port (tokio
+  spawned task on the test runtime — a cross-thread `from_std` listener hits
+  tokio's "Registering a blocking socket" panic).
+- M2: RunPod `DELETE /v2/pods/{id}` is the TERMINATE (permanent) call; 404 is
+  treated as success so teardown is idempotent. RunPod's own "stop" action
+  would keep billing — the driver never uses it.
 ## 14. Decision Log
+- M1: base image `nvidia/cuda:12.9.2-base-ubuntu24.04` (12.4.1 lacks a
+  ubuntu24.04 tag; 12.9.2 is the current 12.x line with it). Python 3.12 ships
+  in the base → venv matches local mypy target.
+- M1: container installs the runtime dep subset pinned from requirements.lock;
+  dev-only tools (pytest/mypy/ruff) are excluded from the image (smaller, no
+  tooling attack surface). httpx added to the lock (real missing-dep fix).
+- M1: `.dockerignore` at repo root excludes `.env`, `target/`, `pod/.venv`,
+  git, node_modules — secrets and 2.7k-venv files never enter the build context.
+- M2: `RUNPOD_API_KEY` absent with PROVIDER=runpod → hard `exit(1)` at startup
+  (fail fast, loud) rather than silent mock fallback — honest S1 gate. Unknown
+  PROVIDER values still fall back to mock with a warning (dev ergonomics).
+- M2: pod name prefix `vihs-` + spec id; container env carries VIHS_POD_ID /
+  POD_MAX_SESSIONS / VIHS_REAL_STAGES=1 so the agent self-identifies on the
+  real GPU pod. VIHS_RUNPOD_ENV JSON merge allows operator extra env.
 ## 15. Outcomes & Retrospective

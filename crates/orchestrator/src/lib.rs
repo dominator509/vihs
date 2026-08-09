@@ -15,6 +15,7 @@ pub mod memoryd_client;
 pub mod metrics;
 pub mod provider;
 pub mod provider_mock;
+pub mod provider_runpod;
 pub mod queue;
 pub mod ratelimit;
 pub mod registry;
@@ -77,6 +78,13 @@ impl PodAssignChannels {
 pub async fn build_state(cfg: Config, memoryd: MemorydClient) -> Arc<AppState> {
     let provider: Arc<dyn PodProvider> = match cfg.provider.as_str() {
         "mock" => MockProvider::new(),
+        "runpod" => match crate::provider_runpod::RunPodProvider::from_env() {
+            Ok(p) => Arc::new(p),
+            Err(e) => {
+                tracing::error!("PROVIDER=runpod but driver init failed: {e}");
+                std::process::exit(1);
+            }
+        },
         other => {
             tracing::warn!("unknown PROVIDER {other}; falling back to mock");
             MockProvider::new()

@@ -1,0 +1,10 @@
+# Build context hygiene for the pod image (EP-009 M1).
+# .env MUST never enter the image context (AGENTS.md §12).
+.git
+.env
+target
+pod/.venv
+pod/build
+pod/*.egg-info
+**/__pycache__
+node_modules
