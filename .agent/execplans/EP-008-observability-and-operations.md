@@ -247,7 +247,8 @@ milestone; re-run that milestone's validation command before continuing.
 ## 12. Progress
 Re-runnable.
 - [x] M1 — control-plane metrics + readyz matrix (orchestrator 2 new tests, memoryd 1 new test; live scrape + e2e traffic verified)
-- [ ] M2  - [ ] M3  - [ ] M4
+- [x] M2 — pod metrics incl. cache-ratio poller + epoch annotations (2 render tests + 1 surface test; pod suite 84; ruff+mypy clean)
+- [ ] M3  - [ ] M4
 
 ## 13. Surprises & Discoveries
 - prometheus 0.14 API differs from 0.13: `TextEncoder::encode_to_string` (not
@@ -263,6 +264,14 @@ Re-runnable.
   memoryd's readyz (which orchestrator now proxies) is the Redis gate.
 - cold_start records at the Booting→Ready transition in registry::ready (single
   point) — the initial scaler-loop heuristic was fragile and removed.
+- Pod hand-rolled Prometheus render (pure stdlib, per plan): the text format
+  allows ONE HELP/TYPE per metric name — a first draft emitted one HELP/TYPE
+  per stage label value for `vihs_stage_first_chunk_ms`, which Prometheus
+  would reject; grouped into one family with per-stage bucket series.
+- Pod endpoint_premature_total has NO live recording site in mock mode: the
+  TurnFSM (which emits COUNT_NEAR_MISS) is test-only; the mock pipeline
+  bypasses it. The counter renders (0) and the real STT driver records it when
+  real stages land (EP-009). Documented, not faked.
 
 ## 14. Decision Log
 - prometheus = 0.14 pinned in workspace deps (AGENTS.md §8: necessary for a
@@ -272,6 +281,10 @@ Re-runnable.
   target, admin :8081 for local ops). memoryd /metrics on :8091 (internal-only).
 - Orchestrator readyz = memoryd passthrough. Redis is memoryd's dependency; the
   orchestrator's only hard control-plane dependency is memoryd.
+- Pod metrics: `render_text` maps pod samples onto registry names
+  (lipsync_ff → lipsync_ttff; e2e_first_frame → vihs_e2e_first_audio_ms).
+  Cache-ratio gauge reads VIHS_MOCK_CACHE_RATIO (mock) with the real vLLM
+  stats poller deferred to EP-009 (documented in code + ENVIRONMENT.md).
 
 ## 15. Outcomes & Retrospective
 - M1 commit: (pending — fill after commit)

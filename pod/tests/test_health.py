@@ -34,6 +34,32 @@ async def test_health_endpoint() -> None:
         await server.wait_closed()
 
 
+async def test_metrics_endpoint_serves_prometheus_text() -> None:
+    """EP-008 M2: GET /metrics returns the Prometheus exposition."""
+
+    async def handler(conn: object) -> None:  # unused in this test
+        return None
+
+    metrics_body = (
+        "# HELP vihs_bargein_total Barge-in events.\n"
+        "# TYPE vihs_bargein_total counter\n"
+        'vihs_bargein_total{pod_id="pod-1",model_ver="mock"} 0\n'
+    )
+    server = await start_pod_surface(
+        "127.0.0.1", 0, "pod-1", lambda: {}, handler, metrics_fn=lambda: metrics_body
+    )
+    port = server.sockets[0].getsockname()[1]
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"http://127.0.0.1:{port}/metrics")
+            assert resp.status_code == 200
+            assert resp.text == metrics_body
+            assert "text/plain" in resp.headers["content-type"]
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
 async def test_signal_ws_routes_to_handler() -> None:
     received: asyncio.Queue[str] = asyncio.Queue()
 

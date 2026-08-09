@@ -32,7 +32,7 @@ from websockets.asyncio.server import ServerConnection
 from vihs_pod.conversation import Conversation, build_stages
 from vihs_pod.health import serve_pod_surface
 from vihs_pod.memory_client import MemoryClient
-from vihs_pod.metrics import Metrics
+from vihs_pod.metrics import Metrics, PodMetrics, render_text
 
 log = logging.getLogger("vihs_pod.agent")
 
@@ -76,6 +76,17 @@ class PodAgent:
         self.mock_answers = mock_answers or []
         self._assignments: dict[str, Conversation] = {}
         self._conversation: Conversation | None = None
+        # EP-008 M2: pod-level counters/gauges + metric labels.
+        self.pod_metrics = PodMetrics()
+        self.model_ver = os.environ.get("VIHS_MODEL_VER", "mock")
+        # session_id → last observed memory epoch (for epoch-boundary
+        # annotation: a resume that carries a HIGHER epoch than the last
+        # session we served means a compaction boundary occurred).
+        self._last_epoch: dict[str, int] = {}
+        # Cache-ratio poller task (SPEC-007 O5): mock mode reads the env
+        # gauge; real mode would poll the vLLM stats endpoint (VIHS_VLLM_STATS_URL).
+        self._cache_poller: asyncio.Task[Any] | None = None
+        self._cache_ratio = float(os.environ.get("VIHS_MOCK_CACHE_RATIO", "0.95"))
 
     # --- pod local surface ---
 
@@ -109,6 +120,15 @@ class PodAgent:
             # Per-stage first-chunk latency percentiles (SPEC-007 O1).
             "metrics": metrics_report,
         }
+
+    def metrics_text(self) -> str:
+        """GET /metrics — Prometheus text exposition (EP-008 M2)."""
+        convo = self._conversation
+        convos = list(self._assignments.values())
+        agg = Metrics.aggregate([c.metrics for c in convos]) if convos else Metrics()
+        self.pod_metrics.append_buffer_depth = convo.append_buffer.depth if convo else 0
+        self.pod_metrics.prefix_cache_hit_ratio = self._cache_ratio
+        return render_text(agg, self.pod_metrics, self.pod_id, self.model_ver)
 
     async def signal_handler(self, conn: ServerConnection) -> None:
         """WS /internal/pods/{id}/signal?connection_id=… — relay client
@@ -214,6 +234,14 @@ class PodAgent:
             connection_id,
             resume,
         )
+        # EP-008 M2: epoch-boundary annotation — a cursor epoch HIGHER than
+        # the last epoch we served for this session means a compaction
+        # boundary happened between assignments (SPEC-007 O5).
+        epoch = int(cursor.get("epoch", 0) or 0)
+        if epoch > self._last_epoch.get(session_id, 0):
+            if session_id in self._last_epoch:
+                self.pod_metrics.record_epoch_boundary()
+            self._last_epoch[session_id] = epoch
         memory = MemoryClient(f"http://{self.memoryd_addr}", pod_token=pod_token)
         stages, monitor = build_stages(self.mock_answers, real=self.real_stages)
         convo = Conversation(
@@ -224,6 +252,7 @@ class PodAgent:
             memory=memory,
             stages=stages,
             monitor=monitor,
+            pod_metrics=self.pod_metrics,
         )
         await convo.start()
         self._conversation = convo
@@ -239,8 +268,23 @@ class PodAgent:
         if self._conversation is convo:
             self._conversation = None
 
+    async def _cache_poller_loop(self) -> None:
+        """SPEC-007 O5: refresh the prefix-cache hit-ratio gauge.
+
+        Mock mode reads the env value (VIHS_MOCK_CACHE_RATIO); real mode
+        would poll the vLLM stats endpoint (VIHS_VLLM_STATS_URL) — that
+        seam lands with the real GPU stages (EP-009).
+        """
+        while True:
+            try:
+                self._cache_ratio = float(os.environ.get("VIHS_MOCK_CACHE_RATIO", "0.95"))
+            except ValueError:
+                self._cache_ratio = 0.95
+            await asyncio.sleep(5.0)
+
     async def run(self) -> None:
         host, _, port = self.pod_addr.partition(":")
+        self._cache_poller = asyncio.create_task(self._cache_poller_loop())
         surface_task = asyncio.create_task(
             serve_pod_surface(
                 host or "127.0.0.1",
@@ -248,6 +292,7 @@ class PodAgent:
                 self.pod_id,
                 self.health,
                 self.signal_handler,
+                self.metrics_text,
             )
         )
         try:
@@ -259,7 +304,8 @@ class PodAgent:
                 health_task.cancel()
         finally:
             surface_task.cancel()
-            await asyncio.gather(surface_task, return_exceptions=True)
+            self._cache_poller.cancel()
+            await asyncio.gather(surface_task, self._cache_poller, return_exceptions=True)
 
 
 def _parse_mock_answers(raw: str | None) -> list[str]:

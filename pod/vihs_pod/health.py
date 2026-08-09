@@ -22,12 +22,20 @@ from websockets.datastructures import Headers
 from websockets.http11 import Response
 
 HealthFn = Callable[[], dict[str, Any]]
+MetricsFn = Callable[[], str]
 SignalHandler = Callable[[ServerConnection], Awaitable[None]]
 
 
 def _json_response(health: dict[str, Any]) -> Response:
     body = json.dumps(health).encode("utf-8")
     return Response(200, "OK", Headers({"Content-Type": "application/json"}), body)
+
+
+def _text_response(
+    body: str,
+    content_type: str = "text/plain; version=0.0.4; charset=utf-8",
+) -> Response:
+    return Response(200, "OK", Headers({"Content-Type": content_type}), body.encode("utf-8"))
 
 
 class SignalBridge:
@@ -58,16 +66,21 @@ async def start_pod_surface(
     pod_id: str,
     health_fn: HealthFn,
     signal_handler: SignalHandler,
+    metrics_fn: MetricsFn | None = None,
 ) -> websockets.asyncio.server.Server:
     """Start the pod's local HTTP+WS surface; returns the running server.
 
     - GET /health → {stages:{...}, fill, cap} (SPEC-003 pod local surface)
+    - GET /metrics → Prometheus text exposition (SPEC-007 O4; EP-008 M2)
     - WS /internal/pods/{id}/signal?connection_id=… → `signal_handler`
     """
 
     def process_request(conn: ServerConnection, request: Any) -> Response | None:
-        if request.path.split("?", 1)[0] == "/health":
+        path = request.path.split("?", 1)[0]
+        if path == "/health":
             return _json_response(health_fn())
+        if path == "/metrics" and metrics_fn is not None:
+            return _text_response(metrics_fn())
         return None
 
     async def ws_handler(conn: ServerConnection) -> None:
@@ -93,9 +106,10 @@ async def serve_pod_surface(
     pod_id: str,
     health_fn: HealthFn,
     signal_handler: SignalHandler,
+    metrics_fn: MetricsFn | None = None,
 ) -> None:
     """Run the pod's local HTTP+WS surface until cancelled."""
-    server = await start_pod_surface(host, port, pod_id, health_fn, signal_handler)
+    server = await start_pod_surface(host, port, pod_id, health_fn, signal_handler, metrics_fn)
     try:
         await asyncio.Future()  # run forever until cancelled
     finally:

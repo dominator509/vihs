@@ -26,7 +26,7 @@ from vihs_pod.append_buffer import AppendBuffer
 from vihs_pod.captions import CaptionsChannel
 from vihs_pod.health import SignalBridge
 from vihs_pod.memory_client import MemoryClient
-from vihs_pod.metrics import Metrics
+from vihs_pod.metrics import Metrics, PodMetrics
 from vihs_pod.pipeline.abort_bus import AbortBus, PlayedSpan
 from vihs_pod.pipeline.flow import StageCrashError, abort_response, run_response
 from vihs_pod.pipeline.ledger import PartialChunk, committed_text
@@ -167,6 +167,7 @@ class Conversation:
         memory: MemoryClient,
         stages: SimpleNamespace,
         monitor: PlaybackMonitor,
+        pod_metrics: PodMetrics | None = None,
     ) -> None:
         self.session_id = session_id
         self.connection_id = connection_id
@@ -194,6 +195,9 @@ class Conversation:
         # Per-stage first-chunk histograms (SPEC-007 O1, ARCHITECTURE §6):
         # the capacity harness (EP-007 M4) reads these via pod /health.
         self.metrics = Metrics()
+        # Pod-level counters/gauges (EP-008 M2): barge-in, abort flush,
+        # endpoint-premature. Shared across conversations on the pod.
+        self.pod_metrics = pod_metrics or PodMetrics()
 
     async def start(self) -> None:
         @self.pc.on("datachannel")
@@ -310,7 +314,11 @@ class Conversation:
     async def _barge_in(self) -> None:
         """Abort the in-flight response, commit the INV-1 partial, and log."""
         partial = self.monitor.partial()
+        started = time.perf_counter()
         committed = await abort_response(self.bus, self.stages, self.ledger, partial)
+        flush_ms = (time.perf_counter() - started) * 1000.0
+        # EP-008 M2: turn-taking metrics (registry OBSERVABILITY.md).
+        self.pod_metrics.record_bargein(flush_ms)
         if self._responding is not None:
             self._responding.cancel()
             with contextlib.suppress(asyncio.CancelledError):
