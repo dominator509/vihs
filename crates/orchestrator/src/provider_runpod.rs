@@ -107,7 +107,8 @@ impl RunPodProvider {
     async fn create_pod(&self, spec: &PodSpec) -> Result<PodId, ProvErr> {
         let mut env = json!({
             "VIHS_POD_ID": spec.id.as_str(),
-            "POD_MAX_SESSIONS": spec.cap,
+            // RunPod API validates env as string values (422 otherwise).
+            "POD_MAX_SESSIONS": spec.cap.to_string(),
             "VIHS_REAL_STAGES": "1",
         });
         // Allow the operator to inject extra pod env (e.g. VIHS_POD_TOKEN is
@@ -345,7 +346,7 @@ mod tests {
         assert_eq!(body["cloud"], "SECURE");
         assert_eq!(body["dataCenterIds"][0], "US-TX-3");
         assert_eq!(body["env"]["VIHS_POD_ID"], "abc-123");
-        assert_eq!(body["env"]["POD_MAX_SESSIONS"], 2);
+        assert_eq!(body["env"]["POD_MAX_SESSIONS"], "2");
     }
 
     #[tokio::test]
