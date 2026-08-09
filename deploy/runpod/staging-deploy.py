@@ -121,6 +121,8 @@ def main() -> int:
         "image": image,
         "gpu": {"id": gpu, "count": 1},
         "cloud": "SECURE",
+        # Volume pins the DC — the pod MUST be in the same DC as the volume.
+        "dataCenterIds": [dc],
         "env": pod_env,
         "ports": [f"{POD_PORT}/http"],
         "mounts": {"network": [{"volumeId": volume_id, "path": VOLUME_DIR}]},
@@ -140,12 +142,12 @@ def main() -> int:
         #    Image pull from GHCR can take 10-20 min on RunPod (observed), so
         #    the deadline covers pull + boot, not just boot.
         pod_addr: str | None = None
-        deadline = time.monotonic() + 1500
+        deadline = time.monotonic() + 2700
         while time.monotonic() < deadline:
             code, resp = api("GET", f"/v2/pods/{pod_id}")
             runtime = resp.get("runtime") or {}
             ports = runtime.get("ports") or []
-            ip = runtime.get("publicIp") or resp.get("runtime", {}).get("ip") or ""
+            ip = runtime.get("publicIp") or runtime.get("ip") or ""
             for p in ports:
                 if str(p.get("privatePort")) == str(POD_PORT):
                     pod_addr = f"{ip}:{p.get('publicPort', POD_PORT)}"
@@ -160,7 +162,7 @@ def main() -> int:
 
         # 3. Wait for orchestrator to mark it Ready (registration + assign WS).
         admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
-        ready_deadline = time.monotonic() + 1500
+        ready_deadline = time.monotonic() + 2700
         ready = False
         while time.monotonic() < ready_deadline:
             try:
