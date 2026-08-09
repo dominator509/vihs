@@ -335,7 +335,13 @@ def main(argv: list[str] | None = None) -> int:
         help="run with mock stage implementations (CI-safe)",
     )
     parser.add_argument("--pod-id", default=os.environ.get("VIHS_POD_ID", "local-pod"))
-    parser.add_argument("--addr", default=os.environ.get("VIHS_POD_ADDR", DEFAULT_POD_ADDR))
+    # EP-009 M4: on RunPod the pod must advertise a PUBLIC addr so the
+    # orchestrator's pod-ward signal WS can reach it. RunPod injects
+    # RUNPOD_PUBLIC_IP; prefer it over the loopback default when set.
+    default_addr = os.environ.get("VIHS_POD_ADDR", DEFAULT_POD_ADDR)
+    if default_addr == DEFAULT_POD_ADDR and os.environ.get("RUNPOD_PUBLIC_IP"):
+        default_addr = f"{os.environ['RUNPOD_PUBLIC_IP']}:8093"
+    parser.add_argument("--addr", default=default_addr)
     parser.add_argument("--orch", default=os.environ.get("VIHS_ORCH_ADDR", DEFAULT_ORCH))
     parser.add_argument("--token", default=os.environ.get("VIHS_POD_TOKEN", DEFAULT_TOKEN))
     parser.add_argument(
