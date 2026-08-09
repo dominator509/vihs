@@ -67,8 +67,9 @@ impl RunPodProvider {
     /// Construct from env. Returns Err(ProvErr::Provider) when PROVIDER=runpod
     /// is selected but RUNPOD_API_KEY is absent — the honest S1 gate.
     pub fn from_env() -> Result<Self, ProvErr> {
-        let api_key = std::env::var(ENV_API_KEY)
-            .map_err(|_| ProvErr::Provider(format!("{ENV_API_KEY} must be set when PROVIDER=runpod")))?;
+        let api_key = std::env::var(ENV_API_KEY).map_err(|_| {
+            ProvErr::Provider(format!("{ENV_API_KEY} must be set when PROVIDER=runpod"))
+        })?;
         Ok(Self::new(
             std::env::var(ENV_API_URL).unwrap_or_else(|_| DEFAULT_API_URL.to_string()),
             api_key,
@@ -114,7 +115,9 @@ impl RunPodProvider {
         // minimum the agent needs to self-identify).
         if let Ok(extra) = std::env::var("VIHS_RUNPOD_ENV") {
             // VIHS_RUNPOD_ENV is a JSON object merged into container env.
-            if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&extra) {
+            if let Ok(obj) =
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&extra)
+            {
                 for (k, v) in obj {
                     env[k] = v;
                 }
@@ -152,7 +155,10 @@ impl RunPodProvider {
 
         let status = resp.status();
         if !status.is_success() {
-            let err = resp.json::<ErrorBody>().await.unwrap_or(ErrorBody { detail: None, title: None });
+            let err = resp.json::<ErrorBody>().await.unwrap_or(ErrorBody {
+                detail: None,
+                title: None,
+            });
             return Err(ProvErr::Provider(format!(
                 "create pod HTTP {status}: {}",
                 err.detail.or(err.title).unwrap_or_else(|| "unknown".into())
@@ -181,7 +187,10 @@ impl RunPodProvider {
             if status == reqwest::StatusCode::NOT_FOUND {
                 return Ok(());
             }
-            let err = resp.json::<ErrorBody>().await.unwrap_or(ErrorBody { detail: None, title: None });
+            let err = resp.json::<ErrorBody>().await.unwrap_or(ErrorBody {
+                detail: None,
+                title: None,
+            });
             return Err(ProvErr::Provider(format!(
                 "terminate pod HTTP {status}: {}",
                 err.detail.or(err.title).unwrap_or_else(|| "unknown".into())
@@ -304,7 +313,14 @@ mod tests {
     }
 
     fn provider(api_url: String) -> RunPodProvider {
-        RunPodProvider::new(api_url, "test-key".into(), "vihs-pod:test".into(), None, Some("US-TX-3".into()), "SECURE".into())
+        RunPodProvider::new(
+            api_url,
+            "test-key".into(),
+            "vihs-pod:test".into(),
+            None,
+            Some("US-TX-3".into()),
+            "SECURE".into(),
+        )
     }
 
     #[tokio::test]
@@ -313,7 +329,11 @@ mod tests {
         let provider = provider_against(&fake).await;
 
         let id = provider.deploy(&spec()).await.expect("deploy ok");
-        assert!(id.as_str().starts_with("pod_"), "id from fake: {}", id.as_str());
+        assert!(
+            id.as_str().starts_with("pod_"),
+            "id from fake: {}",
+            id.as_str()
+        );
 
         let created = fake.created.lock().unwrap();
         assert_eq!(created.len(), 1);
@@ -347,7 +367,10 @@ mod tests {
         let provider = provider_against(&fake).await;
 
         let err = provider.deploy(&spec()).await.unwrap_err();
-        assert!(err.to_string().contains("create pod HTTP 400"), "err: {err}");
+        assert!(
+            err.to_string().contains("create pod HTTP 400"),
+            "err: {err}"
+        );
         assert!(err.to_string().contains("boom"));
     }
 
@@ -355,12 +378,18 @@ mod tests {
     async fn terminate_deletes_and_accepts_404() {
         let fake = FakeRunPod::default();
         let provider = provider_against(&fake).await;
-        provider.terminate(&PodId("pod_1".into())).await.expect("terminate ok");
+        provider
+            .terminate(&PodId("pod_1".into()))
+            .await
+            .expect("terminate ok");
         assert_eq!(*fake.terminated.lock().unwrap(), vec!["pod_1".to_string()]);
 
         // 404 = already gone → idempotent success.
         *fake.delete_status.lock().unwrap() = 404;
-        provider.terminate(&PodId("pod_gone".into())).await.expect("404 treated as ok");
+        provider
+            .terminate(&PodId("pod_gone".into()))
+            .await
+            .expect("404 treated as ok");
     }
 
     #[tokio::test]
@@ -369,15 +398,24 @@ mod tests {
         *fake.delete_status.lock().unwrap() = 403;
         let provider = provider_against(&fake).await;
 
-        let err = provider.terminate(&PodId("pod_1".into())).await.unwrap_err();
-        assert!(err.to_string().contains("terminate pod HTTP 403"), "err: {err}");
+        let err = provider
+            .terminate(&PodId("pod_1".into()))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("terminate pod HTTP 403"),
+            "err: {err}"
+        );
     }
 
     #[test]
     fn cold_start_hint_in_target_window() {
         let p = provider("http://unused".into());
         let secs = p.cold_start_hint().as_secs();
-        assert!((20..=30).contains(&secs), "hint {secs}s outside ARCHITECTURE §13 window");
+        assert!(
+            (20..=30).contains(&secs),
+            "hint {secs}s outside ARCHITECTURE §13 window"
+        );
     }
 
     #[tokio::test]
@@ -392,7 +430,9 @@ mod tests {
     /// Returns (client, base_url); the provider is built with base_url so
     /// every request goes to the fixture (fixture only, no network).
     async fn serve_fake(app: Router) -> (reqwest::Client, String) {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind ephemeral");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind ephemeral");
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             axum::serve(listener, app).await.expect("serve fake");

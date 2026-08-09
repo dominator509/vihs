@@ -60,7 +60,7 @@ steps executed as written (doc bugs fixed in the same plan).
 (re-runnable as stated)
 
 ## 12. Progress
-Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [ ] M3
+Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
 - [ ] M4 - [ ] M5
 
 ## 13. Surprises & Discoveries
@@ -80,6 +80,14 @@ Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [ ] M3
 - M2: RunPod `DELETE /v2/pods/{id}` is the TERMINATE (permanent) call; 404 is
   treated as success so teardown is idempotent. RunPod's own "stop" action
   would keep billing — the driver never uses it.
+- M3: repo has NO git remote and the `dominator509/vihs` GitHub repo does not
+  exist, so the release workflow cannot be triggered on a real tag push.
+  Validation = local dry-run: create `v0.1.0-test-dryrun` tag, run the
+  workflow's steps (verify.sh → build.sh → docker build) locally, confirm
+  green, drop the tag. GHCR push steps stay documented but unexercised until
+  the repo exists.
+- M3: PyYAML parses the Actions `on:` key as boolean True (YAML 1.1) — the
+  trigger structure is intact under GitHub's own parser (push + workflow_dispatch).
 ## 14. Decision Log
 - M1: base image `nvidia/cuda:12.9.2-base-ubuntu24.04` (12.4.1 lacks a
   ubuntu24.04 tag; 12.9.2 is the current 12.x line with it). Python 3.12 ships
@@ -95,4 +103,11 @@ Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [ ] M3
 - M2: pod name prefix `vihs-` + spec id; container env carries VIHS_POD_ID /
   POD_MAX_SESSIONS / VIHS_REAL_STAGES=1 so the agent self-identifies on the
   real GPU pod. VIHS_RUNPOD_ENV JSON merge allows operator extra env.
+- M3: release workflow triggers on `v*` tag push + manual `workflow_dispatch`
+  with a `staging` boolean input (the M4 staging gate). `GITHUB_TOKEN` with
+  `packages: write` handles GHCR; release artifacts (binaries + pod wheel) are
+  attached via `gh release create/upload`. Staging gate only fires with the
+  `RUNPOD_API_KEY` secret configured and the M4 deploy script present — honest
+  placeholder until M4 wires the real deploy.
+- M3: CHANGELOG.md bootstrapped with the Unreleased section covering M1–M2.
 ## 15. Outcomes & Retrospective
