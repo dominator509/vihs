@@ -76,6 +76,10 @@ class PodAgent:
         self.mock_answers = mock_answers or []
         self._assignments: dict[str, Conversation] = {}
         self._conversation: Conversation | None = None
+        # EP-008 M4: completed conversations' latency samples are retained so
+        # /metrics reflects what this pod HAS served (an idle pod must not
+        # show empty histograms). Appended on revoke/stop.
+        self._metrics_history: list[Metrics] = []
         # EP-008 M2: pod-level counters/gauges + metric labels.
         self.pod_metrics = PodMetrics()
         self.model_ver = os.environ.get("VIHS_MODEL_VER", "mock")
@@ -125,7 +129,10 @@ class PodAgent:
         """GET /metrics — Prometheus text exposition (EP-008 M2)."""
         convo = self._conversation
         convos = list(self._assignments.values())
-        agg = Metrics.aggregate([c.metrics for c in convos]) if convos else Metrics()
+        # Live assignments plus retained history from completed ones
+        # (EP-008 M4): the pod's histogram must reflect what it HAS served,
+        # not only the currently-connected sessions.
+        agg = Metrics.aggregate(self._metrics_history + [c.metrics for c in convos])
         self.pod_metrics.append_buffer_depth = convo.append_buffer.depth if convo else 0
         self.pod_metrics.prefix_cache_hit_ratio = self._cache_ratio
         return render_text(agg, self.pod_metrics, self.pod_id, self.model_ver)
@@ -264,6 +271,7 @@ class PodAgent:
         convo = self._assignments.pop(session_id, None)
         if convo is not None:
             await convo.stop()
+            self._metrics_history.append(convo.metrics)
             log.info("assignment revoked session=%s", session_id)
         if self._conversation is convo:
             self._conversation = None

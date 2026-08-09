@@ -38,6 +38,17 @@ pub fn registry() -> &'static Registry {
         ] {
             let _ = r.register(m);
         }
+        // EP-008 M4: the prometheus crate only renders label sets that have
+        // been OBSERVED — a never-fired vec emits nothing and the series
+        // would be absent from /metrics (SPEC-007 requires every registry
+        // name to be emitted). Seed the fixed label values at 0 so the
+        // series is always present.
+        for dir in ["up", "down", "replace"] {
+            scale_events().with_label_values(&[dir]);
+        }
+        for result in ["ok", "denied", "error"] {
+            resume_total().with_label_values(&[result]);
+        }
         r
     })
 }
@@ -102,8 +113,7 @@ fn resume_total() -> &'static IntCounterVec {
 fn authz_denials() -> &'static IntCounter {
     static M: OnceLock<IntCounter> = OnceLock::new();
     M.get_or_init(|| {
-        IntCounter::new("vihs_authz_denials_total", "Authorization denials.")
-            .expect("valid metric")
+        IntCounter::new("vihs_authz_denials_total", "Authorization denials.").expect("valid metric")
     })
 }
 
@@ -137,7 +147,10 @@ pub async fn metrics() -> impl IntoResponse {
     match encoder.encode_to_string(&registry().gather()) {
         Ok(body) => (
             StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
             body,
         ),
         Err(e) => (
@@ -171,9 +184,7 @@ async fn readyz_impl(memoryd_addr: &str) -> axum::response::Response {
     };
     let url = format!("{base}/readyz");
     match client.get(&url).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            (StatusCode::OK, "ok").into_response()
-        }
+        Ok(resp) if resp.status().is_success() => (StatusCode::OK, "ok").into_response(),
         Ok(resp) => (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({
@@ -224,6 +235,35 @@ mod tests {
         ] {
             assert!(body.contains(name), "missing {name} in:\n{body}");
         }
+    }
+
+    /// Seeded label sets render even with zero events (EP-008 M4): the
+    /// crate only emits observed label values, so fixed label sets are
+    /// seeded at 0 at registration. Dynamic-keyed vecs (pod_id) cannot be
+    /// seeded — they appear once a pod event lands (covered by
+    /// render_includes_owned_series).
+    #[test]
+    fn seeded_vecs_render_without_events() {
+        let body = prometheus::TextEncoder::new()
+            .encode_to_string(&registry().gather())
+            .expect("render");
+        for name in [
+            "vihs_scale_events_total",
+            "vihs_resume_total",
+            "vihs_authz_denials_total",
+        ] {
+            assert!(body.contains(name), "missing {name} in:\n{body}");
+        }
+        // And the fixed label values exist (value is 0 on a fresh process;
+        // other tests in this module may have incremented them).
+        assert!(
+            body.contains("vihs_scale_events_total{dir=\"up\"}"),
+            "missing up seed:\n{body}"
+        );
+        assert!(
+            body.contains("vihs_resume_total{result=\"ok\"}"),
+            "missing ok seed:\n{body}"
+        );
     }
 
     /// readyz returns 503 with a retryable body when memoryd is unreachable.

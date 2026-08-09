@@ -85,18 +85,56 @@ pub fn token_id(token: &str) -> Option<String> {
 #[derive(Clone)]
 pub struct TokenStore {
     redis: redis::aio::ConnectionManager,
+    /// Keep the client for readiness probes (see `ping`): a fresh short-lived
+    /// connection with timeouts, not the pooled manager's half-open socket.
+    client: redis::Client,
     pepper: Arc<String>,
+}
+
+/// Execute a single `Cmd` on a connection trait object.
+///
+/// redis-rs's `Cmd::query_async` takes `&mut impl ConnectionLike` (implicit
+/// `Sized`), which a `dyn ConnectionLike` cannot satisfy. `req_packed_command`
+/// is object-safe, so call it directly and convert with the public
+/// `from_owned_redis_value` helper — equivalent to `query_async`.
+async fn query_cmd<T: redis::FromRedisValue>(
+    conn: &mut (dyn redis::aio::ConnectionLike + Send),
+    cmd: &redis::Cmd,
+) -> redis::RedisResult<T> {
+    let val = conn.req_packed_command(cmd).await?;
+    redis::from_owned_redis_value(val.extract_error()?)
+}
+
+/// Execute a non-transaction `Pipeline` (all commands `.ignore()`d — the
+/// shape used by mint/seed) on a connection trait object. Errors inside the
+/// response array are surfaced; ignored values are dropped. Equivalent to
+/// `Pipeline::query_async` for this shape.
+async fn query_pipe(
+    conn: &mut (dyn redis::aio::ConnectionLike + Send),
+    pipe: &redis::Pipeline,
+) -> redis::RedisResult<()> {
+    let count = pipe.cmd_iter().count();
+    let vals = conn.req_packed_commands(pipe, 0, count).await?;
+    redis::Value::Array(vals).extract_error()?;
+    Ok(())
 }
 
 impl TokenStore {
     pub async fn connect(redis_url: &str, pepper: String) -> Result<Self, TokenError> {
         let client = redis::Client::open(redis_url.to_string())
             .map_err(|e| TokenError::Upstream(format!("redis open: {e}")))?;
-        let mgr = redis::aio::ConnectionManager::new(client)
+        // Bound data-path waits: defaults have no response/connection timeout,
+        // so a dead Redis hangs every verify/mint until the OS TCP stack gives
+        // up (~112s). Fail fast — a 503 is better than a hung request.
+        let cfg = redis::aio::ConnectionManagerConfig::new()
+            .set_response_timeout(std::time::Duration::from_secs(3))
+            .set_connection_timeout(std::time::Duration::from_secs(3));
+        let mgr = redis::aio::ConnectionManager::new_with_config(client.clone(), cfg)
             .await
             .map_err(|e| TokenError::Upstream(format!("redis connect: {e}")))?;
         Ok(TokenStore {
             redis: mgr,
+            client,
             pepper: Arc::new(pepper),
         })
     }
@@ -104,13 +142,68 @@ impl TokenStore {
     /// Redis reachability probe (SPEC-006 readyz, EP-007 M3). Shared by the
     /// orchestrator's readiness gate; the token store IS the orchestrator's
     /// Redis dependency (sessions index is an in-memory cache).
+    ///
+    /// Uses a FRESH connection with explicit 2s timeouts instead of the pooled
+    /// manager: when Redis dies the pooled socket goes half-open and redis-rs
+    /// never reconnects until the OS gives up (~112s), so the pooled probe
+    /// HANGS instead of failing fast. A fresh connect fails immediately when
+    /// Redis is down and succeeds as soon as it is back.
     pub async fn ping(&self) -> Result<(), TokenError> {
-        let mut conn = self.redis.clone();
+        let cfg = redis::AsyncConnectionConfig::new()
+            .set_connection_timeout(std::time::Duration::from_secs(2))
+            .set_response_timeout(std::time::Duration::from_secs(2));
+        let mut conn = self
+            .client
+            .get_multiplexed_async_connection_with_config(&cfg)
+            .await
+            .map_err(|e| TokenError::Upstream(format!("redis probe connect: {e}")))?;
         let _: String = redis::cmd("PING")
             .query_async(&mut conn)
             .await
-            .map_err(|e| TokenError::Upstream(format!("redis ping: {e}")))?;
+            .map_err(|e| TokenError::Upstream(format!("redis probe ping: {e}")))?;
         Ok(())
+    }
+
+    /// Run a Redis op through the pooled connection, retrying ONCE on a fresh
+    /// short-lived connection when the pooled socket is stale.
+    ///
+    /// GAP-M3-5: the pooled `ConnectionManager` socket goes half-open across a
+    /// Redis container restart. redis-rs only reconnects on `Reconnect`-class
+    /// errors, which never surface until the OS TCP stack gives up (~112s), so
+    /// the pooled connection alone can hang (or, with the response timeout set
+    /// in `connect`, fail) for minutes AFTER Redis is already back. A fresh
+    /// connection always reflects current reachability — retry once on it.
+    async fn with_conn<T, F>(&self, op: F) -> Result<T, TokenError>
+    where
+        F: for<'a> Fn(
+            &'a mut (dyn redis::aio::ConnectionLike + Send),
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = redis::RedisResult<T>> + Send + 'a>,
+        >,
+    {
+        let mut pooled = self.redis.clone();
+        match op(&mut pooled).await {
+            Ok(v) => Ok(v),
+            Err(e)
+                if e.is_timeout()
+                    || e.is_io_error()
+                    || e.is_connection_dropped()
+                    || e.is_connection_refusal() =>
+            {
+                let cfg = redis::AsyncConnectionConfig::new()
+                    .set_connection_timeout(std::time::Duration::from_secs(2))
+                    .set_response_timeout(std::time::Duration::from_secs(2));
+                let mut fresh = self
+                    .client
+                    .get_multiplexed_async_connection_with_config(&cfg)
+                    .await
+                    .map_err(|e| TokenError::Upstream(format!("redis fresh connect: {e}")))?;
+                op(&mut fresh)
+                    .await
+                    .map_err(|e| TokenError::Upstream(format!("redis op (fresh): {e}")))
+            }
+            Err(e) => Err(TokenError::Upstream(format!("redis op: {e}"))),
+        }
     }
 
     /// Mint a token: generate 32 random bytes, store `argon2id(token+pepper)`
@@ -130,24 +223,30 @@ impl TokenStore {
         let phash = self.hash(&token)?;
         let exp = chrono::Utc::now().timestamp() + ttl.as_secs() as i64;
         let key = redis_key(&token_id);
-        let mut pipe = redis::pipe();
-        pipe.hset_multiple(
-            &key,
-            &[
-                ("owner", owner),
-                ("scope", scope_name(scope)),
-                ("phash", phash.as_str()),
-                ("exp", exp.to_string().as_str()),
-                ("revoked", "0"),
-            ],
-        )
-        .ignore()
-        .expire(&key, ttl.as_secs() as i64)
-        .ignore();
-        let _: () = pipe
-            .query_async(&mut self.redis.clone())
-            .await
-            .map_err(|e| TokenError::Upstream(format!("redis mint: {e}")))?;
+        let _: () = self
+            .with_conn(|conn| {
+                let key = key.clone();
+                let phash = phash.clone();
+                let owner = owner.to_string();
+                Box::pin(async move {
+                    let mut pipe = redis::pipe();
+                    pipe.hset_multiple(
+                        &key,
+                        &[
+                            ("owner", owner.as_str()),
+                            ("scope", scope_name(scope)),
+                            ("phash", phash.as_str()),
+                            ("exp", exp.to_string().as_str()),
+                            ("revoked", "0"),
+                        ],
+                    )
+                    .ignore()
+                    .expire(&key, ttl.as_secs() as i64)
+                    .ignore();
+                    query_pipe(conn, &pipe).await
+                })
+            })
+            .await?;
         Ok(token)
     }
 
@@ -175,24 +274,30 @@ impl TokenStore {
         let phash = self.hash(token)?;
         let exp = chrono::Utc::now().timestamp() + ttl.as_secs() as i64;
         let key = redis_key(&token_id);
-        let mut pipe = redis::pipe();
-        pipe.hset_multiple(
-            &key,
-            &[
-                ("owner", owner),
-                ("scope", scope_name(scope)),
-                ("phash", phash.as_str()),
-                ("exp", exp.to_string().as_str()),
-                ("revoked", "0"),
-            ],
-        )
-        .ignore()
-        .expire(&key, ttl.as_secs() as i64)
-        .ignore();
-        let _: () = pipe
-            .query_async(&mut self.redis.clone())
-            .await
-            .map_err(|e| TokenError::Upstream(format!("redis seed: {e}")))?;
+        let _: () = self
+            .with_conn(|conn| {
+                let key = key.clone();
+                let phash = phash.clone();
+                let owner = owner.to_string();
+                Box::pin(async move {
+                    let mut pipe = redis::pipe();
+                    pipe.hset_multiple(
+                        &key,
+                        &[
+                            ("owner", owner.as_str()),
+                            ("scope", scope_name(scope)),
+                            ("phash", phash.as_str()),
+                            ("exp", exp.to_string().as_str()),
+                            ("revoked", "0"),
+                        ],
+                    )
+                    .ignore()
+                    .expire(&key, ttl.as_secs() as i64)
+                    .ignore();
+                    query_pipe(conn, &pipe).await
+                })
+            })
+            .await?;
         Ok(())
     }
 
@@ -209,11 +314,16 @@ impl TokenStore {
         let token_id = URL_SAFE_NO_PAD.encode(id_bytes);
         let key = redis_key(&token_id);
 
-        let fields: Vec<(String, String)> = redis::cmd("HGETALL")
-            .arg(&key)
-            .query_async(&mut self.redis.clone())
-            .await
-            .map_err(|e| TokenError::Upstream(format!("redis verify: {e}")))?;
+        let fields: Vec<(String, String)> = self
+            .with_conn(|conn| {
+                let key = key.clone();
+                Box::pin(async move {
+                    let mut cmd = redis::cmd("HGETALL");
+                    cmd.arg(&key);
+                    query_cmd(conn, &cmd).await
+                })
+            })
+            .await?;
         let rec: std::collections::HashMap<String, String> = fields.into_iter().collect();
 
         let Some(owner) = rec.get("owner") else {
@@ -251,13 +361,16 @@ impl TokenStore {
             .map_err(|_| TokenError::Authz("malformed token".into()))?;
         let (id_bytes, _) = raw.split_at(TOKEN_ID_BYTES);
         let token_id = URL_SAFE_NO_PAD.encode(id_bytes);
-        let _: () = redis::cmd("HSET")
-            .arg(redis_key(&token_id))
-            .arg("revoked")
-            .arg("1")
-            .query_async(&mut self.redis.clone())
-            .await
-            .map_err(|e| TokenError::Upstream(format!("redis revoke: {e}")))?;
+        let _: () = self
+            .with_conn(|conn| {
+                let key = redis_key(&token_id);
+                Box::pin(async move {
+                    let mut cmd = redis::cmd("HSET");
+                    cmd.arg(&key).arg("revoked").arg("1");
+                    query_cmd(conn, &cmd).await
+                })
+            })
+            .await?;
         Ok(())
     }
 

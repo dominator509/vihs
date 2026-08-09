@@ -12,9 +12,7 @@
 use std::sync::OnceLock;
 
 use axum::http::StatusCode;
-use prometheus::{
-    HistogramOpts, HistogramVec, IntCounter, IntGauge, Registry, TextEncoder,
-};
+use prometheus::{HistogramOpts, HistogramVec, IntCounter, IntGauge, Registry, TextEncoder};
 
 static REGISTRY: OnceLock<Registry> = OnceLock::new();
 
@@ -42,7 +40,9 @@ fn append_latency() -> &'static HistogramVec {
                 "vihs_append_latency_ms",
                 "Append event processing latency (milliseconds).",
             )
-            .buckets(vec![1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0]),
+            .buckets(vec![
+                1.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0, 500.0, 1000.0,
+            ]),
             &[],
         )
         .expect("valid metric")
@@ -85,8 +85,7 @@ fn epoch_boundary() -> &'static IntCounter {
 fn authz_denials() -> &'static IntCounter {
     static M: OnceLock<IntCounter> = OnceLock::new();
     M.get_or_init(|| {
-        IntCounter::new("vihs_authz_denials_total", "Authorization denials.")
-            .expect("valid metric")
+        IntCounter::new("vihs_authz_denials_total", "Authorization denials.").expect("valid metric")
     })
 }
 
@@ -112,7 +111,10 @@ pub async fn metrics() -> impl axum::response::IntoResponse {
     match encoder.encode_to_string(&registry().gather()) {
         Ok(body) => (
             StatusCode::OK,
-            [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
             body,
         ),
         Err(e) => (

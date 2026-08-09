@@ -249,7 +249,7 @@ Re-runnable.
 - [x] M1 — control-plane metrics + readyz matrix (orchestrator 2 new tests, memoryd 1 new test; live scrape + e2e traffic verified)
 - [x] M2 — pod metrics incl. cache-ratio poller + epoch annotations (2 render tests + 1 surface test; pod suite 84; ruff+mypy clean)
 - [x] M3 — dashboards + alert rules as code (5 dashboards + 6 rules; promtool valid; up-obs/down-obs with health-wait; targets up incl. live pod probe; grafana /api/health ok)
-- [ ] M4
+- [x] M4 — metric-presence smoke + runbook links (SMOKE OK + METRIC PRESENCE OK; 1 new orch test; pod suite 84; see gap log)
 
 ## 13. Surprises & Discoveries
 - prometheus 0.14 API differs from 0.13: `TextEncoder::encode_to_string` (not
@@ -284,6 +284,38 @@ Re-runnable.
   running (e2e harness tears its pod down). Proven live with a probe pod
   (target -> up, 3 histogram series scraped), then torn down — the target
   state is honest, not masked.
+- M4: the plan's "non-zero sample for every series" is impossible without
+  fabricating events: authz denials, endpoint premature, compactions, epoch
+  boundaries, scale events and gpu util are legitimately 0 in a clean smoke.
+  Assertion = PRESENCE for every registry name + NON-ZERO for the series the
+  smoke traffic exercises (stage histograms, e2e first audio, append latency,
+  resume ok, cache ratio, pod sessions, cold start). Barge-in/abort-flush are
+  NOT exercised by the smoke path (e2e_resume has no interruption; the full
+  convo target does) — presence-only there too.
+- M4: the harness tears its pod down before smoke-test.sh regains control, so
+  scraping 8093 after the run always fails. Added `--metrics-out DIR` to
+  run_e2e.py: snapshots all three /metrics while the pod is alive.
+- M4: pod /metrics aggregated ONLY live assignments — when the orchestrator
+  revoked the assignment (WS close), the convo's samples vanished and an idle
+  pod rendered empty histograms. Added `_metrics_history`: completed
+  conversations' samples are retained so /metrics reflects what the pod HAS
+  served.
+- M4: the prometheus crate renders ONLY observed label sets — never-fired
+  CounterVecs (scale_events, resume_total) were absent from /metrics on a
+  fresh process, violating SPEC-007 "all names emitted". Fixed label values
+  (up/down/replace, ok/denied/error) are seeded at 0 at registration;
+  dynamic pod_id-keyed vecs (pod_sessions, cold_start) cannot be seeded and
+  appear once a pod event lands.
+- M4: redis_loss_rebuild drill failed 5/5 deterministically — memoryd readyz
+  HUNG when Redis was down and took ~112s to recover in-process. Root cause:
+  redis-rs ConnectionManager defaults carry NO response_timeout, so a PING on
+  the half-open socket (write succeeds, read blocks) never errors until the
+  OS TCP stack gives up; redis-rs only reconnects on Reconnect-class errors
+  which never arrive. The drill's earlier "1.1s recovery" probes were
+  measuring a FRESH process, not same-process recovery. Fixed by probing
+  readyz with a fresh connection (2s timeouts) + bounded pooled timeouts +
+  one fresh-connection retry in TokenStore ops. Verified: down=503@0.00s,
+  up=200@1.0s in-process; drill exits 0.
 
 ## 14. Decision Log
 - prometheus = 0.14 pinned in workspace deps (AGENTS.md §8: necessary for a
@@ -297,9 +329,34 @@ Re-runnable.
   (lipsync_ff → lipsync_ttff; e2e_first_frame → vihs_e2e_first_audio_ms).
   Cache-ratio gauge reads VIHS_MOCK_CACHE_RATIO (mock) with the real vLLM
   stats poller deferred to EP-009 (documented in code + ENVIRONMENT.md).
+- M4 extra files beyond the plan's Expected Changed Files (AGENTS.md §5):
+  - tests/e2e/run_e2e.py: `--metrics-out DIR` — required because the harness
+    tears its pod down before smoke-test.sh regains control; without a
+    while-alive snapshot, the pod series could never be asserted honestly.
+  - crates/orchestrator/src/metrics.rs: zero-seeding of fixed label sets —
+    the crate only renders observed labels, so never-fired vecs were absent
+    (SPEC-007 "all names emitted" violation). Same-milestone fix per
+    AGENTS.md §10 (new behavior ⇒ new test: seeded_vecs_render_without_events).
+  - pod/vihs_pod/agent.py: `_metrics_history` retention — the pod must show
+    what it HAS served, not only live assignments (an idle pod rendered empty
+    histograms after revoke).
+  - crates/memoryd/src/metrics.rs: rustfmt normalization only (M1-era
+    formatting debt surfaced by format-check; no logic change).
+  - crates/memoryd/src/index.rs + crates/vihs-auth/src/store.rs: Redis
+    connection hardening (GAP-M4-3, see Surprises + gap log) — required
+    because the redis_loss_rebuild chaos drill (an EP-007 invariant in
+    verify.sh) could never pass while memoryd's readyz hung ~112s after a
+    Redis bounce. readyz now probes with a fresh short-lived connection
+    (2s timeouts); pooled managers carry 3s response/connection timeouts;
+    TokenStore ops retry once on a fresh connection on stale-socket-class
+    errors. Same-milestone blocker fix per AGENTS.md §10 (the drill is the
+    test).
 
 ## 15. Outcomes & Retrospective
 - M1 commit: 419a804 (control-plane metrics + readyz matrix)
 - M2 commit: ebe8c97 (pod metrics incl. cache-ratio poller + epoch annotations)
-- M3 commit: (pending — fill after commit)
-- Remaining gaps: smoke presence + runbooks (M4).
+- M3 commit: 6305951 (dashboards + alert rules as code)
+- M4 commit: (pending — fill after commit)
+- Remaining gaps: none in EP-008 — SPEC-007 acceptance covered by smoke
+  (metric presence), alerts loaded, runbook links. Staging soak (cache ratio
+  ≥0.9) is post-launch (no staging env in repo).

@@ -55,7 +55,7 @@ TURNS_DURING_PAUSE = 3  # enough to prove media keeps flowing while frozen
 
 def memoryd_pid() -> int:
     out = subprocess.run(
-        ["pgrep", "-af", "target/debug/memoryd"],
+        ["pgrep", "-af", "memoryd"],
         capture_output=True,
         text=True,
     ).stdout.strip()
@@ -66,8 +66,11 @@ def memoryd_pid() -> int:
         if len(parts) != 2:
             continue
         pid, cmd = parts
-        if cmd.startswith("/root/vihs/target/debug/memoryd") or cmd.startswith(
-            "./target/debug/memoryd"
+        if (
+            cmd.startswith("/root/vihs/target/debug/memoryd")
+            or cmd.startswith("/root/vihs/target/release/memoryd")
+            or cmd.startswith("./target/debug/memoryd")
+            or cmd.startswith("./target/release/memoryd")
         ):
             return int(pid)
     raise RuntimeError("memoryd binary process not found (pgrep output:\n" + out + ")")

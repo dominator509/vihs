@@ -38,6 +38,7 @@ POD_VENV = ROOT / "pod" / ".venv" / "bin" / "python"
 ORCH_ADDR = "127.0.0.1:8080"
 MEMORYD_ADDR = "127.0.0.1:8091"
 POD_ADDR = "127.0.0.1:8093"
+METRICS_OUT: str | None = None  # set by --metrics-out DIR (EP-008 M4)
 USER_TOKEN = ""  # minted at startup via POST /admin/tokens (EP-006 M1)
 POD_TOKEN = ""  # loaded from .env VIHS_POD_TOKEN (32-byte b64url, seeded at startup)
 WAIT = 20.0
@@ -455,6 +456,8 @@ async def _run_convo_target(target: str, auth_frame: bool = False) -> None:
             await peer.close()
 
         print(f"{target} OK")
+        if METRICS_OUT:
+            _dump_metrics(METRICS_OUT)
     finally:
         if session_id:
             api(f"/v1/sessions/{session_id}", method="DELETE")
@@ -567,6 +570,31 @@ async def _drive_resume(
     print("  resume carried resume=True; both turns present in order")
 
 
+def _dump_metrics(out_dir: str) -> None:
+    """Snapshot all three /metrics endpoints for the M4 presence smoke.
+
+    Called while the pod is alive (before teardown) so the pod series are
+    captured with real smoke traffic. Each service writes its own file;
+    a failed scrape records the error text so the smoke can report WHY a
+    service was unreachable instead of silently passing.
+    """
+    import urllib.request as _ur
+
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    targets = {
+        "orchestrator": f"http://{ORCH_ADDR}/metrics",
+        "memoryd": f"http://{MEMORYD_ADDR}/metrics",
+        "pod": f"http://{POD_ADDR}/metrics",
+    }
+    for name, url in targets.items():
+        try:
+            with _ur.urlopen(url, timeout=5.0) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+        except Exception as exc:  # noqa: BLE001
+            body = f"# scrape error: {exc}\n"
+        (Path(out_dir) / f"{name}.metrics").write_text(body)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = (
         argv
@@ -579,6 +607,7 @@ def main(argv: list[str] | None = None) -> int:
         ]
     )
     targets: list[str] = []
+    metrics_out: str | None = None
     i = 0
     while i < len(args):
         arg = args[i]
@@ -589,9 +618,19 @@ def main(argv: list[str] | None = None) -> int:
         elif arg == "--base-url":
             # Remote-target form is not used by local verify; accept+ignore.
             i += 1
+        elif arg == "--metrics-out":
+            # EP-008 M4: snapshot /metrics from all three services while the
+            # pod is alive (the harness tears the pod down at the end).
+            i += 1
+            if i >= len(args):
+                print("--metrics-out requires a directory", file=sys.stderr)
+                return 2
+            metrics_out = args[i]
         else:
             targets.append(arg)
         i += 1
+    global METRICS_OUT
+    METRICS_OUT = metrics_out
     try:
         owned = ensure_services()
         try:

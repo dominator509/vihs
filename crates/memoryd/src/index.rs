@@ -3,7 +3,7 @@
 //! never data. Key shapes are the SPEC-002 registry — do not invent keys.
 
 use chrono::Utc;
-use redis::aio::ConnectionManager;
+use redis::aio::{ConnectionManager, ConnectionManagerConfig};
 use redis::AsyncCommands;
 
 use crate::error::IndexErr;
@@ -34,24 +34,53 @@ pub struct SessionSnapshot {
 
 pub struct RedisIndex {
     conn: ConnectionManager,
+    /// Keep the client for readiness probes: a FRESH short-lived connection
+    /// with explicit timeouts is the only honest way to test reachability
+    /// across a Redis restart (the pooled manager holds a half-open socket
+    /// for minutes — see `ping` docs).
+    client: redis::Client,
 }
 
 impl RedisIndex {
     pub async fn new(url: &str) -> Result<Self, IndexErr> {
         let client = redis::Client::open(url).map_err(|e| IndexErr::Redis(e.to_string()))?;
-        let conn = ConnectionManager::new(client)
+        // Bound data-path waits: with the redis-rs defaults (no response or
+        // connection timeout) a dead Redis hangs every command until the OS
+        // TCP stack gives up (~112s observed). Fail fast instead — Redis is a
+        // hot cache (ADR-003); latency, not availability, is the contract.
+        let cfg = ConnectionManagerConfig::new()
+            .set_response_timeout(std::time::Duration::from_secs(3))
+            .set_connection_timeout(std::time::Duration::from_secs(3));
+        let conn = ConnectionManager::new_with_config(client.clone(), cfg)
             .await
             .map_err(|e| IndexErr::Redis(e.to_string()))?;
-        Ok(RedisIndex { conn })
+        Ok(RedisIndex { conn, client })
     }
 
     /// Redis reachability probe (SPEC-006 readyz, EP-007 M3).
+    ///
+    /// Opens a FRESH short-lived connection with explicit 2s timeouts instead
+    /// of pinging through the pooled `ConnectionManager`. Why: when Redis dies
+    /// (container stop), the pooled TCP socket goes half-open — the PING write
+    /// lands in the kernel buffer, the read blocks forever, and redis-rs only
+    /// reconnects on `Reconnect`-class errors which never surface until the OS
+    /// TCP keepalive gives up (~112s). The pooled readyz therefore HANGS when
+    /// Redis is down and takes minutes to recover when it returns. A fresh
+    /// connection fails fast (ECONNREFUSED -> 503) and succeeds immediately
+    /// once Redis is back — the honest readiness signal.
     pub async fn ping(&self) -> Result<(), IndexErr> {
-        let mut conn = self.conn.clone();
+        let cfg = redis::AsyncConnectionConfig::new()
+            .set_connection_timeout(std::time::Duration::from_secs(2))
+            .set_response_timeout(std::time::Duration::from_secs(2));
+        let mut conn = self
+            .client
+            .get_multiplexed_async_connection_with_config(&cfg)
+            .await
+            .map_err(|e| IndexErr::Redis(format!("readyz connect: {e}")))?;
         let _: String = redis::cmd("PING")
             .query_async(&mut conn)
             .await
-            .map_err(|e| IndexErr::Redis(e.to_string()))?;
+            .map_err(|e| IndexErr::Redis(format!("readyz ping: {e}")))?;
         Ok(())
     }
 
