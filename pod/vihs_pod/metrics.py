@@ -71,6 +71,28 @@ class Metrics:
             for stage in ("llm_ttft", "tts_ttfa", "lipsync_ff", "e2e_first_frame", "e2e_total")
         )
 
+    @classmethod
+    def aggregate(cls, instances: list[Metrics]) -> Metrics:
+        """Merge per-conversation samples into one pod-level histogram set.
+
+        The capacity harness (EP-007 M4) ramps concurrent sessions on one
+        pod and needs a single per-stage percentile view across ALL of them
+        (SPEC-007 O1 labels the histogram pod_id — the aggregate is the
+        pod's histogram).
+        """
+        out = cls()
+        for stage in (
+            "llm_ttft",
+            "tts_ttfa",
+            "lipsync_ff",
+            "e2e_first_frame",
+            "e2e_total",
+        ):
+            bucket = getattr(out, f"{stage}_ms")
+            for inst in instances:
+                bucket.extend(getattr(inst, f"{stage}_ms"))
+        return out
+
     def fmt_report(self) -> str:
         rows = ["stage                 count   min    p50    p95    max"]
         for stage, s in self.report().items():

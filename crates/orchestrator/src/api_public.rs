@@ -132,7 +132,7 @@ async fn connect_session(
         Ok(outcome) => {
             // Bind relay route so the client WS can reach the pod.
             st.relay
-                .bind(&outcome.connection_id, outcome.pod_id.as_str())
+                .bind(&outcome.connection_id, outcome.pod_id.as_str(), &session_id)
                 .await;
             Ok(Json(json!({
                 "connect": {

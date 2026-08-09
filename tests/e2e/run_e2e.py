@@ -42,7 +42,9 @@ USER_TOKEN = ""  # minted at startup via POST /admin/tokens (EP-006 M1)
 POD_TOKEN = ""  # loaded from .env VIHS_POD_TOKEN (32-byte b64url, seeded at startup)
 WAIT = 20.0
 
-ANSWER_LONG = "First sentence is done. Second one is longer and gets cut before finishing."
+ANSWER_LONG = (
+    "First sentence is done. Second one is longer and gets cut before finishing."
+)
 ANSWER_SHORT = "Understood. Continuing from here."
 # Turn 1 answers short; turn 2 is the long barge-in target; turn 3 uses the
 # ScriptedLLM fallback ("Understood.").
@@ -236,11 +238,16 @@ def transcript_of(session_id: str) -> str:
     return body if isinstance(body, str) else json.dumps(body)
 
 
-def _start_pod_agent(pod_id: str, mock_answers: list[str] | None = None) -> tuple[subprocess.Popen, Path]:
+def _start_pod_agent(
+    pod_id: str, mock_answers: list[str] | None = None
+) -> tuple[subprocess.Popen, Path]:
     log_path = Path(tempfile.gettempdir()) / f"vihs-pod-{os.getpid()}.log"
+    # .env provides service defaults; PROCESS env wins so test/harness
+    # overrides (e.g. POD_MAX_SESSIONS from tests/load/capacity.py) take
+    # effect — capacity.py sets os.environ directly and documents that.
     pod_env = {
-        **os.environ,
         **load_env(ROOT / ".env"),
+        **os.environ,
         "VIHS_POD_ADDR": POD_ADDR,
         "VIHS_POD_TOKEN": POD_TOKEN,
         "VIHS_POD_LOG": "info",
@@ -314,7 +321,9 @@ class ClientPeer:
         first = json.loads(await asyncio.wait_for(self.ws.recv(), timeout))
         if first.get("t") != "state":
             raise RuntimeError(f"expected state frame, got {first}")
-        await self.ws.send(json.dumps({"t": "offer", "sdp": self.pc.localDescription.sdp}))
+        await self.ws.send(
+            json.dumps({"t": "offer", "sdp": self.pc.localDescription.sdp})
+        )
         while True:
             frame = json.loads(await asyncio.wait_for(self.ws.recv(), timeout))
             if frame.get("t") == "answer":
@@ -358,7 +367,9 @@ def websockets_connect(url: str, auth_frame: bool = False):
         # the FIRST message must be the SPEC-005 auth frame. No header at all.
         return websockets.connect(url, max_size=64 * 1024)
     return websockets.connect(
-        url, additional_headers={"Authorization": f"Bearer {USER_TOKEN}"}, max_size=64 * 1024
+        url,
+        additional_headers={"Authorization": f"Bearer {USER_TOKEN}"},
+        max_size=64 * 1024,
     )
 
 
@@ -371,8 +382,12 @@ def e2e_connect() -> None:
         pod_id = f"e2e-pod-{os.getpid()}"
         pod_proc, log_path = _start_pod_agent(pod_id)
 
-        if not asyncio.run(wait_for_text(log_path, "assign channel live", timeout=15.0)):
-            raise RuntimeError("pod did not connect its assign WS (register/ack failed)")
+        if not asyncio.run(
+            wait_for_text(log_path, "assign channel live", timeout=15.0)
+        ):
+            raise RuntimeError(
+                "pod did not connect its assign WS (register/ack failed)"
+            )
 
         status, body = api("/v1/sessions", method="POST", body={"persona_id": "e2e"})
         if status != 201:
@@ -452,11 +467,15 @@ async def _run_convo_target(target: str, auth_frame: bool = False) -> None:
         stop_processes(owned)
 
 
-async def _drive_convo(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: Path, session_id: str) -> None:
+async def _drive_convo(
+    peer: ClientPeer, pod_proc: subprocess.Popen, log_path: Path, session_id: str
+) -> None:
     # Turn 1: short normal answer (ANSWER_SHORT).
     await peer.say("Hello there.")
     await peer.wait_caption(timeout=10.0)
-    if not await wait_for_text(log_path, "committed turn=1 interrupted=False", timeout=10.0):
+    if not await wait_for_text(
+        log_path, "committed turn=1 interrupted=False", timeout=10.0
+    ):
         raise RuntimeError("turn 1 did not commit normally")
     transcript = transcript_of(session_id)
     if ANSWER_SHORT not in transcript:
@@ -468,7 +487,9 @@ async def _drive_convo(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: P
     await peer.wait_caption(timeout=10.0)  # clause 2 delta (queued for play)
     await asyncio.sleep(0.30)  # clause 2 mid-playback (clause 2 plays ~510 ms)
     await peer.say("Never mind, continue.")
-    if not await wait_for_text(log_path, "committed turn=2 interrupted=True", timeout=10.0):
+    if not await wait_for_text(
+        log_path, "committed turn=2 interrupted=True", timeout=10.0
+    ):
         raise RuntimeError("barge-in did not commit an interrupted turn")
 
     # INV-1: the committed text is the PLAYED prefix — clause 1 verbatim plus
@@ -480,21 +501,31 @@ async def _drive_convo(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: P
         raise RuntimeError(f"barge-in committed UNPLAYED text:\n{transcript}")
 
     # Turn 3: the follow-up input gets the ScriptedLLM fallback.
-    if not await wait_for_text(log_path, "committed turn=3 interrupted=False", timeout=10.0):
+    if not await wait_for_text(
+        log_path, "committed turn=3 interrupted=False", timeout=10.0
+    ):
         raise RuntimeError("post-barge-in answer did not commit")
     transcript = transcript_of(session_id)
     if "Understood." not in transcript:
-        raise RuntimeError(f"post-barge-in answer missing from transcript:\n{transcript}")
+        raise RuntimeError(
+            f"post-barge-in answer missing from transcript:\n{transcript}"
+        )
     finals = [c for c in peer.captions if c.get("final")]
     if not finals:
         raise RuntimeError("no final:true caption frame observed")
-    print("  convo: 3 turns committed; barge-in committed ONLY the played prefix; captions final seen")
+    print(
+        "  convo: 3 turns committed; barge-in committed ONLY the played prefix; captions final seen"
+    )
 
 
-async def _drive_resume(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: Path, session_id: str) -> None:
+async def _drive_resume(
+    peer: ClientPeer, pod_proc: subprocess.Popen, log_path: Path, session_id: str
+) -> None:
     # Turn 1 on the first connection.
     await peer.say("First message before disconnect.")
-    if not await wait_for_text(log_path, "committed turn=1 interrupted=False", timeout=10.0):
+    if not await wait_for_text(
+        log_path, "committed turn=1 interrupted=False", timeout=10.0
+    ):
         raise RuntimeError("turn 1 did not commit")
     # Disconnect: close the client peer + signal WS. The assignment persists.
     await peer.close()
@@ -517,7 +548,9 @@ async def _drive_resume(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: 
     try:
         await peer2.connect()
         await peer2.say("Second message after resume.")
-        if not await wait_for_text(log_path, "committed turn=2 interrupted=False", timeout=10.0):
+        if not await wait_for_text(
+            log_path, "committed turn=2 interrupted=False", timeout=10.0
+        ):
             raise RuntimeError("resumed turn 2 did not commit")
     finally:
         await peer2.close()
@@ -535,12 +568,16 @@ async def _drive_resume(peer: ClientPeer, pod_proc: subprocess.Popen, log_path: 
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = argv or sys.argv[1:] or [
-        "e2e_connect",
-        "e2e_convo",
-        "e2e_resume",
-        "e2e_authframe",
-    ]
+    args = (
+        argv
+        or sys.argv[1:]
+        or [
+            "e2e_connect",
+            "e2e_convo",
+            "e2e_resume",
+            "e2e_authframe",
+        ]
+    )
     targets: list[str] = []
     i = 0
     while i < len(args):

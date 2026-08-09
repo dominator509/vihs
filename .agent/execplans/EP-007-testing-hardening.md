@@ -64,7 +64,7 @@ cleaned by dev-services down/up (dev only).
 
 ## 12. Progress
 - [x] M1 pod kill  - [x] M2 memoryd pause  - [x] M3 torn/rebuild
-- [ ] M4 capacity harness  - [ ] M5 audit+CI
+- [x] M4 capacity harness  - [ ] M5 audit+CI
 
 M1 notes (validation `sh scripts/chaos.sh` = kill_pod_midturn OK / CHAOS OK;
 full verify.sh includes the chaos gate):
@@ -128,7 +128,68 @@ verify.sh includes both chaos gates):
   re-run). Logging: flusher pickups at info (one line per event, aids
   debugging), retries at DEBUG per SPEC-006 logging rules.
 
+M4 notes (validation `pod/.venv/bin/python tests/load/capacity.py` =
+LOADTEST OK; `VIHS_CAPACITY_SIM_BREACH=1 …` = SIM_BREACH OK; full
+verify.sh includes the capacity gate via scripts/loadtest-capacity.sh):
+- LIVE pod now records SPEC-007 O1 per-stage first-chunk histograms:
+  `Metrics` wired into `Conversation` turns, `Metrics.aggregate()` merges
+  per-session samples pod-level, aggregated `metrics` dict exposed in pod
+  /health. Previously metrics existed only in the M6 in-process test.
+- Env-gated mock stage latencies (`VIHS_MOCK_LLM_TTFT_MS`,
+  `VIHS_MOCK_TTS_TTFA_MS`, `VIHS_MOCK_LIPSYNC_FF_MS`) so CI can simulate
+  realistic first-chunk budgets without a GPU; defaults stay 0.
+- NEW `tests/load/capacity.py` — ramps concurrent sessions on ONE pod,
+  one turn per session, reads per-stage p95 from pod /health, stops at
+  the first budget breach, derives `sessions_per_gpu` + binding constraint
+  (VRAM bound ARCHITECTURE §13). CI mode + `VIHS_CAPACITY_SIM_BREACH=1`
+  (forces lipsync_ff over budget → proves stop-at-first-breach).
+  `scripts/loadtest-capacity.sh` is the verify.sh driver.
+- TWO REAL PRODUCT GAPS found + fixed (see gap log):
+  GAP-M4-1: orchestrator never pushed a `revoke` frame when a client's
+  signaling WS closed — the pod only releases assignments on revoke, so
+  fill never drained and the next ramp stage got `no_capacity`. Fixed in
+  signal_route.rs: all three exit paths (client close, pod gone, pod-ward
+  connect failure) now push `{"t":"revoke",session_id,connection_id}` on
+  the pod's assign channel + unbind the relay; pumps restructured with
+  tokio::select! so a client-only close with a silent pod still tears the
+  relay down. RelayHandle routes now carry session_id (RelayRoute).
+  GAP-M4-2: pod's signal_handler routed ALL signal connections to the
+  single `_conversation` pointer (last-assigned) — with concurrent
+  assignments every peer's offer would land in one conversation's bridge.
+  Fixed in agent.py: route by `?connection_id=` to the owning
+  conversation in `_assignments`.
+- Findings: (1) `_start_pod_agent` built pod_env as
+  `{**os.environ, **load_env(.env)}` — .env WINS, so the harness's
+  `POD_MAX_SESSIONS=3` never reached the pod (registered cap stayed 2) →
+  stage-3 connect failed with no_capacity. Flipped to
+  `{**load_env(.env), **os.environ}` so process env (test/harness
+  overrides) wins over .env defaults. (2) The harness read pod /health
+  immediately after the caption — but e2e_total is the LAST stage of
+  run_response, so reading early races injected latencies (SIM_BREACH's
+  600 ms lipsync sleep never showed). Added `wait_metrics_settled(n)`
+  (poll until e2e_total count >= n) before the p95 read.
+- CI-mode results: cap=3 ramp all stages within budget
+  (llm_ttft ≤3 ms, tts_ttfa 0 ms, lipsync_ff ≤21 ms, e2e_total ≤176 ms)
+  → sessions_per_gpu = 3 (constraint: cap). SIM_BREACH: lipsync_ff
+  621 ms > 400 ms budget at stage 1 → sessions_per_gpu = 0, constraint
+  lipsync_ff. Both LOADTEST OK.
+- Orchestrator 71 tests green (2 new: revoke_frame shape, relay route
+  round-trip); pod 76 tests green (2 new: signal routing by connection_id,
+  unknown connection rejected). e2e connect/convo/authframe/resume green
+  (resume log proves assign → revoke on disconnect → re-assign resume=True).
+
 ## 13. Surprises & Discoveries
+- M4: The capacity harness found the assignment slot NEVER releases when a
+  client disconnects — the orchestrator's signal route unbinds the relay
+  but the pod only pops assignments on a `revoke` frame (SPEC-003). This
+  is a REAL production leak (a dead client's session pins a pod slot until
+  the pod dies), exposed by the simplest possible load test.
+- M4: pod_env precedence — `{**os.environ, **load_env(.env)}` means .env
+  silently beats test/harness env overrides. Any future harness env must
+  account for the order (now flipped: process env wins).
+- M4: reading /health after a caption is a race — the caption fires in the
+  voice stage, but e2e_total records at the END of run_response. Settle
+  waits must key on the LAST stage, not the first observable signal.
 - M3: The two chaos drills exposed FIVE real product gaps (GAP-M3-1..5,
   logged with evidence in `.agent/execplans/EP-007-M3-gap-log.md` BEFORE
   fixing, per protocol). All five were spec-mandated behavior the chaos
@@ -210,41 +271,32 @@ verify.sh includes both chaos gates):
   ways: standalone (starts + cleans up) and in-gate (restarts + leaves up).
 
 ## 15. Outcomes & Retrospective
-M2 delivered the R2 append buffer (real spec gap found while scoping: pod
-appended synchronously, media path could block on memoryd) + the
-memoryd_pause chaos proof: buffer depth rises under freeze (samples
-[3,5,7,7,7,7,7]), 3 turns commit while memoryd is frozen (media never
-stalls), drains to 0 after SIGCONT, zero turns lost. Full verify.sh GREEN
-with BOTH chaos gates (kill_pod_midturn + memoryd_pause) in the permanent
-gate. Remaining risk documented: ~1 s per-append argon2 latency bounds how
-much of the in-flight turn survives a pod kill (INV-3-sanctioned); a
-token-verify cache is the backlog item if per-append durability matters in
-production.
-
-M3 delivered the two chaos proofs + FIVE product gap fixes:
-- torn_write_fsck: corrupt a COPY of a log (valid JSON, payload mutated →
-  BadHash) → public resume returns 409 integrity_hold, memoryd /load 409,
-  rebuild-index fscks and logs `fsck failed`, session stays 409 (never
-  auto-repaired). GREEN.
-- redis_loss_rebuild: create + commit → Redis DOWN (readyz 503 on BOTH
-  services) → recover (readyz 200) → restart memoryd (fresh connection,
-  GAP-M3-5) → FLUSHALL → old token 401 → rebuild-index restores index +
-  owner → restart orchestrator (tokens re-seeded, SessionIndex warmed
-  from owner zsets, GAP-M3-4) → fresh token → session visible + transcript
-  IDENTICAL to the pre-loss snapshot. GREEN.
-- Gap fixes (all logged first, verified live): GAP-M3-1 orchestrator
-  surfaces memoryd 409 integrity_hold as 409 (was 503); GAP-M3-2 readyz
-  pings Redis on both services (503 while down, verified live); GAP-M3-3
-  rebuild/heal restore owner + owner zset from the create-note meta.owner;
-  GAP-M3-4 SessionIndex warm-up on orchestrator restart; GAP-M3-5 memoryd
-  authz classifies upstream token-store failures as 503 retryable (never
-  a poisoned 401). memoryd suites: 21 tests green (authz 10, integ 10,
-  lib 1).
+M4 delivered the capacity + latency load harness and exposed + fixed TWO
+real product gaps:
+- GAP-M4-1 (assignment slot leak): client disconnect never revoked the
+  pod assignment → fill never drained → capacity never freed. Now every
+  signal-route exit (client close, pod gone, pod-ward connect failure)
+  pushes a SPEC-003 `revoke` frame and unbinds the relay; pump teardown
+  uses tokio::select! so a client-only close with a silent pod tears the
+  relay down promptly. Relay routes carry session_id for the frame.
+- GAP-M4-2 (signal misrouting): pod routed all signal WS to the single
+  `_conversation` pointer; concurrent assignments would feed every peer's
+  offer into one bridge. Now routes by `?connection_id=` to the owning
+  conversation.
+- Harness: CI-mode ramp on ONE pod (cap=3) → all stages within budget,
+  sessions_per_gpu = 3 (constraint: cap). SIM_BREACH forces lipsync_ff
+  over budget → stops at stage 1, sessions_per_gpu = 0 (constraint
+  lipsync_ff) — the stop-at-first-breach logic is proven. Both LOADTEST
+  OK.
+- Gates green: orchestrator 71 (2 new), pod 76 (2 new), mypy clean,
+  ruff clean (pod/), e2e connect/convo/authframe/resume green, live
+  revoke verified in the resume log (assign → revoke → re-assign
+  resume=True).
 - Remaining risks: (1) memoryd's Redis connection has no retry/reconnect
   config — a Redis bounce requires the documented service restart; the 503
   retryable classification keeps that honest. (2) ~1 s argon2 per-append
   latency (M2 backlog, unchanged). (3) cargo-audit RUSTSECs via
   aws-smithy (pre-existing, `|| echo` swallow).
-Next: M4 capacity/latency harness (CI-mode; real run is the EP-010/staging
-step, STOP S1 without a GPU host — RUNPOD_API_KEY is the only missing
-credential, needed at EP-009).
+Next: M5 coverage audit vs TESTING.md required-tests + flaky mechanism +
+CI chaos job; the EP-010/staging capacity run needs a GPU host
+(RUNPOD_API_KEY is the only missing credential, needed at EP-009).

@@ -17,9 +17,17 @@ pub const MAX_FRAME_BYTES: usize = 16 * 1024;
 pub const MAX_STRIKES: u32 = 3;
 
 #[derive(Debug, Clone)]
+pub struct RelayRoute {
+    /// The pod connection id (the pod's own WS identity).
+    pub pod_id: String,
+    /// The session bound to this connection — the revoke frame needs it.
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct RelayHandle {
-    /// connection_id → pod connection id (the pod's own WS identity)
-    pub routes: Arc<Mutex<HashMap<String, String>>>,
+    /// connection_id → {pod_id, session_id} (the pod's own WS identity)
+    pub routes: Arc<Mutex<HashMap<String, RelayRoute>>>,
 }
 
 impl RelayHandle {
@@ -29,11 +37,14 @@ impl RelayHandle {
         })
     }
 
-    pub async fn bind(&self, connection_id: &str, pod_conn: &str) {
-        self.routes
-            .lock()
-            .await
-            .insert(connection_id.to_string(), pod_conn.to_string());
+    pub async fn bind(&self, connection_id: &str, pod_id: &str, session_id: &str) {
+        self.routes.lock().await.insert(
+            connection_id.to_string(),
+            RelayRoute {
+                pod_id: pod_id.to_string(),
+                session_id: session_id.to_string(),
+            },
+        );
     }
 
     pub async fn unbind(&self, connection_id: &str) {
@@ -75,6 +86,18 @@ pub fn client_to_pod(v: &Value) -> Result<Option<Value>, String> {
 /// Build a state frame (server→client).
 pub fn state_frame(state: &str) -> Value {
     json!({ "t": "state", "v": state })
+}
+
+/// Build the SPEC-003 `revoke` frame pushed to a pod's assign channel when
+/// a client's signaling connection ends (EP-007 M4: the pod only releases
+/// its assignment slot on revoke — without it, fill never drains and the
+/// next connect gets no_capacity).
+pub fn revoke_frame(session_id: &str, connection_id: &str) -> Value {
+    json!({
+        "t": "revoke",
+        "session_id": session_id,
+        "connection_id": connection_id,
+    })
 }
 
 /// Build a turn frame when TURN is configured.
@@ -157,5 +180,24 @@ mod tests {
         let f = state_frame("connected");
         assert_eq!(f["t"], "state");
         assert_eq!(f["v"], "connected");
+    }
+
+    #[test]
+    fn revoke_frame_shape() {
+        let f = revoke_frame("sess-1", "conn-2");
+        assert_eq!(f["t"], "revoke");
+        assert_eq!(f["session_id"], "sess-1");
+        assert_eq!(f["connection_id"], "conn-2");
+    }
+
+    #[tokio::test]
+    async fn relay_route_roundtrips_pod_and_session() {
+        let relay = RelayHandle::new();
+        relay.bind("conn-1", "pod-9", "sess-3").await;
+        let route = relay.routes.lock().await.get("conn-1").cloned().unwrap();
+        assert_eq!(route.pod_id, "pod-9");
+        assert_eq!(route.session_id, "sess-3");
+        relay.unbind("conn-1").await;
+        assert!(relay.routes.lock().await.get("conn-1").is_none());
     }
 }

@@ -26,6 +26,7 @@ from vihs_pod.append_buffer import AppendBuffer
 from vihs_pod.captions import CaptionsChannel
 from vihs_pod.health import SignalBridge
 from vihs_pod.memory_client import MemoryClient
+from vihs_pod.metrics import Metrics
 from vihs_pod.pipeline.abort_bus import AbortBus, PlayedSpan
 from vihs_pod.pipeline.flow import abort_response, run_response
 from vihs_pod.pipeline.ledger import PartialChunk
@@ -125,11 +126,20 @@ def build_stages(
         # harness types text); it is exercised by its own unit tests.
         return SimpleNamespace(llm=llm, tts=tts, lipsync=lipsync, mux=monitor), monitor
 
+    # EP-007 M4: the capacity harness injects mock stage latencies via env so
+    # CI can simulate realistic per-stage budgets without a GPU host. Defaults
+    # stay 0 (existing tests unchanged). Values are milliseconds.
+    import os
+
     from vihs_pod.mocks.stages import MockLipSync, MockMux, MockTTS, ScriptedLLM
 
-    llm = ScriptedLLM(answers or [])
-    tts = MockTTS(ms_per_char=10)
-    lipsync = MockLipSync()
+    llm_ttft_ms = float(os.environ.get("VIHS_MOCK_LLM_TTFT_MS", "0")) / 1000.0
+    tts_ttfa_ms = float(os.environ.get("VIHS_MOCK_TTS_TTFA_MS", "0")) / 1000.0
+    lipsync_ff_ms = float(os.environ.get("VIHS_MOCK_LIPSYNC_FF_MS", "0")) / 1000.0
+
+    llm = ScriptedLLM(answers or [], ttft=llm_ttft_ms)
+    tts = MockTTS(ms_per_char=10, ttfa=tts_ttfa_ms)
+    lipsync = MockLipSync(ff=lipsync_ff_ms)
     monitor = PlaybackMonitor(MockMux())
     return SimpleNamespace(llm=llm, tts=tts, lipsync=lipsync, mux=monitor), monitor
 
@@ -166,6 +176,9 @@ class Conversation:
         # R2 append buffer (ARCHITECTURE §9): committed events are queued and
         # flushed in the background — the media path never blocks on memoryd.
         self.append_buffer = AppendBuffer(memory, session_id)
+        # Per-stage first-chunk histograms (SPEC-007 O1, ARCHITECTURE §6):
+        # the capacity harness (EP-007 M4) reads these via pod /health.
+        self.metrics = Metrics()
 
     async def start(self) -> None:
         @self.pc.on("datachannel")
@@ -226,6 +239,7 @@ class Conversation:
             self._turn_id,
             self.ledger,
             on_caption=self._send_caption,
+            metrics=self.metrics,
         )
         await self._send_caption_final(self._turn_id)
         await self._append_event("assistant", committed.text, interrupted=False)

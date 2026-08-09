@@ -140,7 +140,7 @@ async fn handle_signal(
         let routes = st.relay.routes.lock().await;
         routes.get(&connection_id).cloned()
     };
-    let Some(pod_key) = pod_conn else {
+    let Some(route) = pod_conn else {
         let _ = client
             .send(Message::Text(
                 json!({"t":"error","code":"not_found","message":"no assignment for connection"})
@@ -150,6 +150,8 @@ async fn handle_signal(
             .await;
         return;
     };
+    let pod_key = route.pod_id.clone();
+    let session_id = route.session_id.clone();
 
     // Open a pod-ward signaling socket. In EP-004 the fake pod exposes
     // `/internal/pods/{id}/signal`; the real pod (EP-005/EP-009) mirrors it.
@@ -162,6 +164,12 @@ async fn handle_signal(
                     .into(),
             ))
             .await;
+        // The assignment was pushed but the pod vanished — revoke the slot
+        // (best-effort; its assign channel is likely gone too).
+        if let Some(tx) = st.pod_assign.senders.get(&pod_key) {
+            let _ = tx.send(crate::signal::revoke_frame(&session_id, &connection_id));
+        }
+        st.relay.unbind(&connection_id).await;
         return;
     };
 
@@ -179,6 +187,12 @@ async fn handle_signal(
                         .into(),
                 ))
                 .await;
+            // The client can never reach the pod through this relay —
+            // release the assignment slot so the session is reconnectable.
+            if let Some(tx) = st.pod_assign.senders.get(&pod_key) {
+                let _ = tx.send(crate::signal::revoke_frame(&session_id, &connection_id));
+            }
+            st.relay.unbind(&connection_id).await;
             return;
         }
     };
@@ -190,7 +204,10 @@ async fn handle_signal(
         ))
         .await;
 
-    // Two pump tasks: client→pod, pod→client. Stop when either side closes.
+    // Two pump tasks: client→pod, pod→client. tokio::select! runs them
+    // concurrently and completes as soon as EITHER side closes — a
+    // client-only close with a silent pod must still tear the relay down
+    // (EP-007 M4) so the assignment is revoked and the pod's fill drains.
     let (client_sink, mut client_stream) = client.split();
     let (mut pod_sink, mut pod_stream) = pod_ws.split();
     // The rate-limit error frame must reach the client, so the client sink is
@@ -200,7 +217,7 @@ async fn handle_signal(
     // client → pod
     let c2p_st = st.clone();
     let c2p_sink = client_sink.clone();
-    let c2p = tokio::spawn(async move {
+    let c2p = async move {
         while let Some(Ok(msg)) = client_stream.next().await {
             let text = match msg {
                 Message::Text(t) => t,
@@ -237,26 +254,42 @@ async fn handle_signal(
                     .await;
             }
         }
-    });
+    };
 
     // pod → client (state + answer + ice + captions)
-    while let Some(Ok(msg)) = pod_stream.next().await {
-        let text = match msg {
-            tokio_tungstenite::tungstenite::Message::Text(t) => t,
-            tokio_tungstenite::tungstenite::Message::Close(_) => break,
-            _ => continue,
-        };
-        if client_sink
-            .lock()
-            .await
-            .send(Message::Text(text.into()))
-            .await
-            .is_err()
-        {
-            break;
+    let p2c_sink = client_sink.clone();
+    let p2c = async move {
+        while let Some(Ok(msg)) = pod_stream.next().await {
+            let text = match msg {
+                tokio_tungstenite::tungstenite::Message::Text(t) => t,
+                tokio_tungstenite::tungstenite::Message::Close(_) => break,
+                _ => continue,
+            };
+            if p2c_sink
+                .lock()
+                .await
+                .send(Message::Text(text.into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
         }
+    };
+
+    tokio::select! {
+        _ = c2p => {}
+        _ = p2c => {}
     }
-    c2p.abort();
+
+    // Either the client is gone or the pod side closed. Push a revoke frame
+    // so the pod releases the assignment slot — the pod only pops
+    // assignments on `revoke` (EP-007 M4: without this, fill never drains
+    // and the next ramp stage gets no_capacity). Best-effort: the pod may
+    // already be gone, in which case its assign channel is unregistered too.
+    if let Some(tx) = st.pod_assign.senders.get(&pod_key) {
+        let _ = tx.send(crate::signal::revoke_frame(&session_id, &connection_id));
+    }
     st.relay.unbind(&connection_id).await;
 }
 

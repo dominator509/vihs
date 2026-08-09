@@ -22,6 +22,7 @@ import logging
 import os
 import signal
 import sys
+import urllib.parse
 from typing import Any
 
 import httpx
@@ -31,6 +32,7 @@ from websockets.asyncio.server import ServerConnection
 from vihs_pod.conversation import Conversation, build_stages
 from vihs_pod.health import serve_pod_surface
 from vihs_pod.memory_client import MemoryClient
+from vihs_pod.metrics import Metrics
 
 log = logging.getLogger("vihs_pod.agent")
 
@@ -80,6 +82,14 @@ class PodAgent:
     def health(self) -> dict[str, Any]:
         mode = "real" if self.real_stages else "mock"
         convo = self._conversation
+        # Aggregate per-stage first-chunk histograms across ALL assignments
+        # (SPEC-007 O1: the histogram is labeled pod_id — this is the pod's
+        # view). The capacity harness (EP-007 M4) reads these via /health.
+        convos = list(self._assignments.values())
+        metrics_report: dict[str, Any] = {}
+        if convos:
+            agg = Metrics.aggregate([c.metrics for c in convos])
+            metrics_report = agg.report()
         return {
             "stages": {s: "ready" for s in STAGES},
             "stages_mode": mode,
@@ -92,15 +102,32 @@ class PodAgent:
             "append_buffer_in_flight": convo.append_buffer.in_flight if convo else 0,
             "append_buffer_flusher_alive": convo.append_buffer.flusher_alive if convo else False,
             "append_buffer_degraded": convo.append_buffer.degraded if convo else False,
+            # Per-stage first-chunk latency percentiles (SPEC-007 O1).
+            "metrics": metrics_report,
         }
 
     async def signal_handler(self, conn: ServerConnection) -> None:
-        """WS /internal/pods/{id}/signal — relay client frames to the active
-        conversation's SignalBridge and drain pod→client frames back."""
-        bridge = self._conversation.bridge if self._conversation is not None else None
-        if bridge is None:
+        """WS /internal/pods/{id}/signal?connection_id=… — relay client
+        frames to the conversation OWNING that connection and drain
+        pod→client frames back.
+
+        EP-007 M4: route by connection_id, NOT the single `_conversation`
+        pointer — with concurrent assignments (capacity ramp) each signal
+        WS belongs to its own session; using `_conversation` would feed
+        every peer's offer into the last-assigned conversation's bridge.
+        """
+        # The orchestrator includes ?connection_id=… on the pod-ward WS.
+        path = conn.request.path if conn.request is not None else ""
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query)
+        connection_id = (qs.get("connection_id") or [""])[0]
+        convo = next(
+            (c for c in self._assignments.values() if c.connection_id == connection_id),
+            None,
+        )
+        if convo is None:
             await conn.close(code=1008, reason="no active assignment")
             return
+        bridge = convo.bridge
 
         async def writer() -> None:
             while True:
