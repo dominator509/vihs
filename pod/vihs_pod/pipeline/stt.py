@@ -28,19 +28,29 @@ class FasterWhisperSTT:
     """
 
     def __init__(
-        self, model_size: str = "base", device: str = "cpu", compute_type: str = "int8"
+        self,
+        model_size: str = "base",
+        device: str = "cpu",
+        compute_type: str = "int8",
+        model_dir: str | None = None,
     ) -> None:
         self.model_size = model_size
         self.device = device
         self.compute_type = compute_type
+        self.model_dir = model_dir
         self._model = None
 
     def _load(self) -> Any:
         if self._model is None:
-            from faster_whisper import WhisperModel  # type: ignore[import-not-found]  # noqa: F401
+            from faster_whisper import WhisperModel  # type: ignore[import-untyped]  # noqa: F401
 
+            # model_dir points at the network-volume stt/ layout when set
+            # (VOLUME.md); otherwise faster-whisper downloads from HF hub.
             self._model = WhisperModel(
-                self.model_size, device=self.device, compute_type=self.compute_type
+                self.model_size,
+                device=self.device,
+                compute_type=self.compute_type,
+                **({"download_root": self.model_dir} if self.model_dir else {}),
             )
         return self._model
 

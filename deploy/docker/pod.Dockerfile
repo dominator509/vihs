@@ -37,7 +37,9 @@ RUN pip install --upgrade pip \
         av==17.1.0 \
         websockets==17.0.1 \
         numpy==2.5.1 \
-        httpx==0.28.1
+        httpx==0.28.1 \
+        faster-whisper==1.2.1 \
+        piper-tts==1.6.0
 
 # Pod package from source (setuptools>=68 per pyproject).
 COPY pod/ /workspace/pod/

@@ -122,13 +122,35 @@ def build_stages(
             from vihs_pod.mocks.stages import ScriptedLLM
 
             llm = ScriptedLLM(answers or [])
-        tts: Any = PiperTTS()
+
+        # Real STT/TTS read their model paths from VIHS_MODEL_DIR (the
+        # network-volume mount, VOLUME.md layout): stt/ and tts/. Fall back
+        # to the adapter defaults when the env var is unset (local dev).
+        model_dir = os.environ.get("VIHS_MODEL_DIR", "")
+        if model_dir:
+            from vihs_pod.pipeline.stt import FasterWhisperSTT
+
+            stt: Any = FasterWhisperSTT(
+                model_size=os.environ.get("VIHS_STT_MODEL", "base"),
+                device=os.environ.get("VIHS_STT_DEVICE", "cuda"),
+                compute_type=os.environ.get("VIHS_STT_COMPUTE", "float16"),
+                model_dir=os.path.join(model_dir, "stt"),
+            )
+            tts: Any = PiperTTS(
+                binary=os.environ.get("VIHS_TTS_BIN", "piper"),
+                voice=os.environ.get(
+                    "VIHS_TTS_VOICE", os.path.join(model_dir, "tts", "en_US-lessac-medium.onnx")
+                ),
+            )
+        else:
+            stt = None
+            tts = PiperTTS()
         lipsync: Any = StubLipSync()
         mux: Any = GStreamerMux()
         monitor = PlaybackMonitor(mux)
         # VAD is built but not wired into the mock user-input path (the E2E
         # harness types text); it is exercised by its own unit tests.
-        return SimpleNamespace(llm=llm, tts=tts, lipsync=lipsync, mux=monitor), monitor
+        return SimpleNamespace(llm=llm, stt=stt, tts=tts, lipsync=lipsync, mux=monitor), monitor
 
     # EP-007 M4: the capacity harness injects mock stage latencies via env so
     # CI can simulate realistic per-stage budgets without a GPU host. Defaults

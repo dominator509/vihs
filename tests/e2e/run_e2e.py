@@ -38,6 +38,7 @@ POD_VENV = ROOT / "pod" / ".venv" / "bin" / "python"
 ORCH_ADDR = "127.0.0.1:8080"
 MEMORYD_ADDR = "127.0.0.1:8091"
 POD_ADDR = "127.0.0.1:8093"
+REMOTE = False  # --base-url sets this; skips local service/pod boot
 METRICS_OUT: str | None = None  # set by --metrics-out DIR (EP-008 M4)
 USER_TOKEN = ""  # minted at startup via POST /admin/tokens (EP-006 M1)
 POD_TOKEN = ""  # loaded from .env VIHS_POD_TOKEN (32-byte b64url, seeded at startup)
@@ -99,6 +100,42 @@ async def wait_for_text(path: Path, pattern: str, timeout: float = WAIT) -> bool
                 return True
         await asyncio.sleep(0.25)
     return False
+
+
+def wait_transcript_contains(session_id: str, needle: str, timeout: float = WAIT) -> bool:
+    """Remote-mode readiness: poll the DURABLE transcript via the orchestrator
+    API until it contains `needle`. Stronger than a pod log line — it asserts
+    the commit landed in the store, not that the pod printed something."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        t = transcript_of(session_id)
+        if needle in t:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def wait_ready_pod(timeout: float = 120.0) -> dict:
+    """Remote-mode pod wait: poll GET /admin/pods (admin bearer) until at
+    least one pod is Ready. Returns the first Ready pod dict."""
+    env = load_env(ROOT / ".env")
+    admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            req = urllib.request.Request(
+                f"http://{ORCH_ADDR}/admin/pods",
+                headers={"Authorization": f"Bearer {admin_tok}"},
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                body = json.loads(resp.read())
+            for p in body.get("pods", []):
+                if p.get("state") == "ready":
+                    return p
+        except Exception as exc:  # noqa: BLE001
+            print(f"  admin/pods poll: {exc}")
+        time.sleep(2.0)
+    raise RuntimeError(f"no ready pod within {timeout}s on {ORCH_ADDR}")
 
 
 def bootstrap_tokens() -> None:
@@ -418,6 +455,82 @@ def e2e_connect() -> None:
         stop_processes(owned)
 
 
+async def _remote_resume() -> None:
+    """EP-009 M4 remote smoke: drive one turn + resume against a REMOTE
+    orchestrator with a pre-registered (real) pod. No local service boot, no
+    pod spawn — asserts against the DURABLE transcript via the API."""
+    print(f"== remote resume against {ORCH_ADDR} ==")
+    pod = wait_ready_pod()
+    print(f"  ready pod {pod.get('id')} state={pod.get('state')} fill={pod.get('fill')}")
+
+    status, body = api("/v1/sessions", method="POST", body={"persona_id": "e2e"})
+    if status != 201:
+        raise RuntimeError(f"create session failed: {status} {body}")
+    session_id = body["session_id"]
+    assert isinstance(session_id, str)
+
+    try:
+        connection_id = _connect_session(session_id)
+        peer = ClientPeer(connection_id)
+        try:
+            await peer.connect()
+            print("  client WebRTC connected through relay (remote pod)")
+            # Turn 1: user text lands in the durable transcript, then the
+            # assistant reply (transcript renders the assistant under the
+            # persona label — "Assistant" when no persona event exists).
+            await peer.say("First message before disconnect.")
+            if not await asyncio.to_thread(
+                wait_transcript_contains, session_id, "First message before disconnect.", 30.0
+            ):
+                raise RuntimeError("turn 1 user text not in durable transcript")
+            if not await asyncio.to_thread(
+                wait_transcript_contains, session_id, "**Assistant**", 60.0
+            ):
+                raise RuntimeError("turn 1 assistant reply not in durable transcript")
+            print("  turn 1 committed (user + assistant in transcript)")
+        finally:
+            await peer.close()
+
+        # Resume the SAME session: durable cursor drives resume=true.
+        status, body = api(f"/v1/sessions/{session_id}/resume", method="POST")
+        print("  resume status:", status, json.dumps(body)[:120])
+        if status != 200:
+            raise RuntimeError(f"resume failed: {status} {body}")
+        connection_id = body["connect"]["connection_id"]
+        await asyncio.sleep(0.5)
+
+        peer2 = ClientPeer(connection_id)
+        try:
+            await peer2.connect()
+            await peer2.say("Second message after resume.")
+            if not await asyncio.to_thread(
+                wait_transcript_contains, session_id, "Second message after resume.", 30.0
+            ):
+                raise RuntimeError("turn 2 user text not in durable transcript")
+            if not await asyncio.to_thread(
+                wait_transcript_contains, session_id, "**Assistant**", 60.0
+            ):
+                raise RuntimeError("turn 2 assistant reply not in durable transcript")
+        finally:
+            await peer2.close()
+
+        transcript = transcript_of(session_id)
+        if "First message before disconnect." not in transcript:
+            raise RuntimeError("turn 1 missing after resume")
+        if "Second message after resume." not in transcript:
+            raise RuntimeError("turn 2 missing after resume")
+        first = transcript.index("First message before disconnect.")
+        second = transcript.index("Second message after resume.")
+        if second < first:
+            raise RuntimeError("turn order broken after resume")
+        print("  remote resume: both turns present in order; transcript durable")
+        if METRICS_OUT:
+            _dump_metrics(METRICS_OUT)
+        print("e2e_remote_resume OK")
+    finally:
+        api(f"/v1/sessions/{session_id}", method="DELETE")
+
+
 async def _run_convo_target(target: str, auth_frame: bool = False) -> None:
     owned = ensure_services()
     pod_proc: subprocess.Popen | None = None
@@ -541,7 +654,7 @@ async def _drive_resume(
     connection_id = body["connect"]["connection_id"]
     await asyncio.sleep(0.5)
     recent = "\n".join(
-        l for l in log_path.read_text(errors="replace").splitlines() if "assigned" in l
+        line for line in log_path.read_text(errors="replace").splitlines() if "assigned" in line
     )
     print("  pod assign lines after resume:\n" + recent)
     if not await wait_for_text(log_path, "resume=True", timeout=10.0):
@@ -581,10 +694,29 @@ def _dump_metrics(out_dir: str) -> None:
     import urllib.request as _ur
 
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    pod_metrics_url = f"http://{POD_ADDR}/metrics"
+    if REMOTE:
+        # The remote pod's /metrics lives at its public addr (from the admin
+        # snapshot), not at the local POD_ADDR.
+        env = load_env(ROOT / ".env")
+        admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
+        try:
+            req = urllib.request.Request(
+                f"http://{ORCH_ADDR}/admin/pods",
+                headers={"Authorization": f"Bearer {admin_tok}"},
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                body = json.loads(resp.read())
+            for p in body.get("pods", []):
+                if p.get("state") == "ready":
+                    pod_metrics_url = f"http://{p['addr']}/metrics"
+                    break
+        except Exception as exc:  # noqa: BLE001
+            print(f"  admin/pods for metrics: {exc}")
     targets = {
         "orchestrator": f"http://{ORCH_ADDR}/metrics",
         "memoryd": f"http://{MEMORYD_ADDR}/metrics",
-        "pod": f"http://{POD_ADDR}/metrics",
+        "pod": pod_metrics_url,
     }
     for name, url in targets.items():
         try:
@@ -616,8 +748,23 @@ def main(argv: list[str] | None = None) -> int:
             # (COMMANDS.md) — the e2e_resume target covers exactly that.
             targets.append("e2e_resume")
         elif arg == "--base-url":
-            # Remote-target form is not used by local verify; accept+ignore.
+            # EP-009 M4: remote staging form — point every API/WS call at the
+            # staging orchestrator and use a pre-registered (real) pod.
             i += 1
+            if i >= len(args):
+                print("--base-url requires a URL", file=sys.stderr)
+                return 2
+            base = args[i].rstrip("/")
+            # Accept http(s)://host:port or bare host:port.
+            if "://" in base:
+                base = base.split("://", 1)[1]
+            global ORCH_ADDR, REMOTE
+            ORCH_ADDR = base
+            REMOTE = True
+        elif arg == "--remote-smoke":
+            # Explicit remote smoke target (EP-009 M4): same as --smoke but
+            # against the staging orchestrator + real pod.
+            targets.append("e2e_remote_resume")
         elif arg == "--metrics-out":
             # EP-008 M4: snapshot /metrics from all three services while the
             # pod is alive (the harness tears the pod down at the end).
@@ -632,14 +779,21 @@ def main(argv: list[str] | None = None) -> int:
     global METRICS_OUT
     METRICS_OUT = metrics_out
     try:
-        owned = ensure_services()
+        # Remote mode: the staging control plane + pod are already running;
+        # never boot local services or spawn a local pod.
+        owned = ensure_services() if not REMOTE else []
         try:
             bootstrap_tokens()
             for target in targets:
                 if target == "e2e_connect":
                     e2e_connect()
                 elif target in ("e2e_convo", "e2e_resume"):
+                    if REMOTE:
+                        print(f"local target {target} requires a local pod; use --remote-smoke", file=sys.stderr)
+                        return 2
                     asyncio.run(_run_convo_target(target))
+                elif target == "e2e_remote_resume":
+                    asyncio.run(_remote_resume())
                 elif target == "e2e_authframe":
                     # Browser-compatible auth path (EP-006 M5): the signal WS
                     # carries NO Authorization header — the token arrives as

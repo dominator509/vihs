@@ -1,13 +1,19 @@
 #!/usr/bin/env sh
 # Smoke: boot (or target) the stack, run one turn + resume + delete.
-# Usage: smoke-test.sh [BASE_URL]  (no arg = local boot with mock stages)
+# Usage: smoke-test.sh [BASE_URL]  (no arg = local boot with mock stages;
+# BASE_URL = staging orchestrator → remote smoke against a real pod, EP-009 M4)
 set -eu
 cd "$(dirname "$0")/.."
 if [ -f tests/e2e/run_e2e.py ] && [ -d pod/.venv ]; then
   OUT="$(mktemp -d)"
   trap 'rm -rf "$OUT"' EXIT
-  pod/.venv/bin/python tests/e2e/run_e2e.py --smoke \
-    --metrics-out "$OUT" ${1:+--base-url "$1"}
+  if [ -n "${1:-}" ]; then
+    pod/.venv/bin/python tests/e2e/run_e2e.py --remote-smoke --base-url "$1" \
+      --metrics-out "$OUT"
+  else
+    pod/.venv/bin/python tests/e2e/run_e2e.py --smoke \
+      --metrics-out "$OUT"
+  fi
   pod/.venv/bin/python - "$OUT" <<'PY'
 """EP-008 M4: assert the required metric series are PRESENT on each
 service and that the traffic-exercised series carry non-zero samples.

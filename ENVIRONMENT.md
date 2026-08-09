@@ -48,6 +48,8 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_RUNPOD_API_URL | no | test | https://api.runpod.io | N | RunPod API base (fixture override in driver tests; EP-009 M2) | https URL |
 | VIHS_RUNPOD_ENV | no | stage,prod | (unset) | N | JSON object merged into pod container env (EP-009 M2) | JSON object |
 | VIHS_MODEL_DIR | pod | all | /workspace/models | N | network-volume mount | dir exists on pod |
+| VIHS_STT_MODEL / VIHS_STT_DEVICE / VIHS_STT_COMPUTE | no | stage,prod | base / cuda / float16 | N | real STT stage model settings (EP-009 M4; model_dir = $VIHS_MODEL_DIR/stt) | str / cuda\|cpu / float16\|int8 |
+| VIHS_TTS_BIN / VIHS_TTS_VOICE | no | stage,prod | piper / $VIHS_MODEL_DIR/tts/en_US-lessac-medium.onnx | N | real TTS stage binary + voice path (EP-009 M4) | str / path |
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat endpoint | reachable in real mode |
 | VIHS_REAL_STAGES | no | dev | 0 | N | 1 = real GPU stages | 0/1 |
 | VIHS_MOCK_ANSWERS | no | dev | ["...","..."] | N | scripted mock-LLM answers per turn (E2E) | JSON array of strings |
