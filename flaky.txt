@@ -1,0 +1,12 @@
+# Flaky-test quarantine (TESTING.md flaky policy, EP-007 M5).
+#
+# A test failing intermittently is quarantined here by name (test nodeid
+# substring). It STILL RUNS in every gate; a failure matching an entry here
+# is non-gating (warning only). Policy: max 5 working days with an open
+# note in the active ExecPlan, then fix or revert. Never use this to hide
+# a deterministic failure — time-dependent flakiness is fixed by injecting
+# clocks, never by widening sleeps.
+#
+# (empty — no quarantined tests. Add nodeids like:
+#  tests/test_pipeline_flow.py::test_pipeline_overhead_within_budget_slack
+# )

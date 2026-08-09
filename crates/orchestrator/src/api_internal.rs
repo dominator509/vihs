@@ -78,6 +78,13 @@ async fn pod_health(
     let id = PodId(pod_id.clone());
     let fill = body["fill"].as_u64().unwrap_or(0) as u32;
     st.registry.ping(&id, fill);
+    // SPEC-006 row 1: a pod that reports degraded (2+ stage crashes in a
+    // session) must be drained — no new assignments, existing sessions
+    // finish, then the scaler replaces it.
+    if body["degraded"].as_bool().unwrap_or(false) {
+        st.registry.drain(&id);
+        tracing::warn!(pod_id = %pod_id, "pod reported degraded — draining");
+    }
     Ok((StatusCode::OK, Json(json!({"ok": true}))).into_response())
 }
 

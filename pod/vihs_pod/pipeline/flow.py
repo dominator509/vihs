@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from vihs_pod.pipeline.abort_bus import AbortBus
+from vihs_pod.pipeline.abort_bus import AbortBus, PlayedSpan
 from vihs_pod.pipeline.clause import ClauseChunker
 from vihs_pod.pipeline.ledger import PartialChunk, committed_text
 from vihs_pod.pipeline.protocols import AudioChunk
@@ -38,6 +38,41 @@ class Committed:
     interrupted: bool
     clauses: dict[int, str]
     partial: PartialChunk | None = None
+
+
+class StageCrashError(RuntimeError):
+    """A pipeline stage raised mid-turn (SPEC-006 row 1).
+
+    Carries the stage name so the conversation can emit a `stage_error`
+    note (no user text) and speak the fixed recovery utterance. The
+    original exception is chained (`__cause__`) for diagnostics.
+    `played` is filled by `run_response`'s abort path: the PlayedSpans
+    the mux actually reported before the crash, so the recovery path can
+    commit the INV-1 partial exactly.
+    """
+
+    def __init__(self, stage: str, original: BaseException) -> None:
+        super().__init__(f"stage {stage} crashed: {original}")
+        self.stage = stage
+        self.original = original
+        self.played: list[PlayedSpan] = []
+
+
+def _tag_stage(stage: str, coro: Any) -> Any:
+    """Wrap a stage coroutine so any exception becomes StageCrashError.
+
+    `except Exception` (NOT BaseException): asyncio.CancelledError inherits
+    BaseException, so a barge-in abort still propagates as cancellation —
+    the crash handler must never swallow the abort path (SPEC-001 D3).
+    """
+
+    async def wrapped() -> None:
+        try:
+            await coro
+        except Exception as e:  # noqa: BLE001 — re-raised typed below
+            raise StageCrashError(stage, e) from e
+
+    return wrapped()
 
 
 async def run_response(
@@ -122,10 +157,25 @@ async def run_response(
                 metrics.record("e2e_first_frame", (time.perf_counter() - _t0) * 1000.0)
                 metrics._e2e_ff_recorded = True
 
-    tasks = [asyncio.create_task(f()) for f in (brain, voice, face_and_wire)]
+    tasks = [
+        asyncio.create_task(_tag_stage("llm", brain())),
+        asyncio.create_task(_tag_stage("tts", voice())),
+        asyncio.create_task(_tag_stage("lipsync", face_and_wire())),
+    ]
     for t in tasks:
         bus.guard(t)
-    await asyncio.gather(*tasks)  # CancelledError propagates on abort
+    try:
+        await asyncio.gather(*tasks)  # CancelledError propagates on abort
+    except StageCrashError as e:
+        # SPEC-006 row 1: a stage crashed mid-turn — abort the remaining
+        # stages cleanly (cancel siblings, flush the mux, resolve the
+        # ledger) and hand the played spans to the recovery path so the
+        # INV-1 partial can be committed exactly (no double-flush).
+        e.played = await bus.abort(
+            mux=lambda: st.mux.flush_and_report(),
+            renderer=lambda: _neutral(st),
+        )
+        raise
 
     played = await st.mux.flush_and_report()
     text = committed_text(ledger, played)

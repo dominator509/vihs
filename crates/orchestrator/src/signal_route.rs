@@ -218,15 +218,36 @@ async fn handle_signal(
     let c2p_st = st.clone();
     let c2p_sink = client_sink.clone();
     let c2p = async move {
+        // SPEC-006 signaling row: schema/size abuse → `bad_signal` error
+        // frame, close the WS after 3 strikes (the live counterpart of
+        // signal::client_read_loop's MAX_STRIKES; the loop here also does
+        // rate limiting + pod forwarding).
+        let mut strikes: u32 = 0;
         while let Some(Ok(msg)) = client_stream.next().await {
             let text = match msg {
                 Message::Text(t) => t,
                 _ => continue,
             };
-            let v: Value = match serde_json::from_str(&text) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
+            // Parse once; a JSON parse failure is itself a strike.
+            let parsed: Option<Value> = serde_json::from_str(&text).ok();
+            if let Err(reason) = crate::signal::strike_reason(&text, parsed.as_ref()) {
+                strikes += 1;
+                if strikes >= crate::signal::MAX_STRIKES {
+                    // Third strike: `bad_signal` error frame + close
+                    // (SPEC-006 row 6).
+                    let _ = c2p_sink
+                        .lock()
+                        .await
+                        .send(Message::Text(
+                            json!({"t":"error","code":"bad_signal","message":reason,"retryable":false})
+                                .to_string()
+                                .into(),
+                        ))
+                        .await;
+                    break;
+                }
+                continue;
+            }
             // SPEC-005 A5: signaling messages ≤50/s per token → rate_limited
             // error frame + close (abuse control; SPEC-006 signaling row).
             if c2p_st
@@ -246,13 +267,11 @@ async fn handle_signal(
                 break;
             }
             // Forward validated client frames to the pod.
-            if crate::signal::validate_client_frame(&v).is_ok() {
-                let _ = pod_sink
-                    .send(tokio_tungstenite::tungstenite::Message::Text(
-                        text.to_string(),
-                    ))
-                    .await;
-            }
+            let _ = pod_sink
+                .send(tokio_tungstenite::tungstenite::Message::Text(
+                    text.to_string(),
+                ))
+                .await;
         }
     };
 

@@ -68,6 +68,25 @@ class ScriptedLLM:
             yield ch
 
 
+class StageCrashLLM:
+    """Fault hook (EP-007 M5, SPEC-006 row 1): raises after the FIRST
+    token, simulating a pipeline stage crash mid-turn.
+
+    Wraps a ScriptedLLM; the crash is deterministic (first stream() call
+    raises) so the chaos drill and unit tests assert the exact recovery
+    behavior: clean abort, `stage_error` note, recovery utterance, and
+    degrade-after-2.
+    """
+
+    def __init__(self, inner: ScriptedLLM) -> None:
+        self._inner = inner
+
+    async def stream(self, prompt: str) -> AsyncIterator[str]:
+        async for ch in self._inner.stream(prompt):
+            yield ch
+            raise RuntimeError("fault: stage_crash (VIHS_FAULT injected)")
+
+
 class MockTTS:
     """Converts a clause into audio chunks with known dur/chars coverage.
 

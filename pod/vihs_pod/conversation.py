@@ -28,10 +28,14 @@ from vihs_pod.health import SignalBridge
 from vihs_pod.memory_client import MemoryClient
 from vihs_pod.metrics import Metrics
 from vihs_pod.pipeline.abort_bus import AbortBus, PlayedSpan
-from vihs_pod.pipeline.flow import abort_response, run_response
-from vihs_pod.pipeline.ledger import PartialChunk
+from vihs_pod.pipeline.flow import StageCrashError, abort_response, run_response
+from vihs_pod.pipeline.ledger import PartialChunk, committed_text
 from vihs_pod.pipeline.protocols import AudioChunk
 from vihs_pod.webrtc_loopback import wait_gathering_complete
+
+# SPEC-006 row 1: the fixed recovery utterance spoken after a pipeline
+# stage crash (SPEC-001 "apologize-utterance path, fixed string").
+RECOVERY_UTTERANCE = "Something went wrong on my end. Give me a moment."
 
 log = logging.getLogger("vihs_pod.conversation")
 
@@ -138,6 +142,13 @@ def build_stages(
     lipsync_ff_ms = float(os.environ.get("VIHS_MOCK_LIPSYNC_FF_MS", "0")) / 1000.0
 
     llm = ScriptedLLM(answers or [], ttft=llm_ttft_ms)
+    # EP-007 M5: env-gated fault hook (SPEC-006 row 1). `VIHS_FAULT=stage_crash`
+    # wraps the LLM so the FIRST streamed token raises — the chaos drill
+    # (tests/chaos/stage_crash.py) proves the recovery path deterministically.
+    if os.environ.get("VIHS_FAULT", "") == "stage_crash":
+        from vihs_pod.mocks.stages import StageCrashLLM
+
+        llm = StageCrashLLM(llm)
     tts = MockTTS(ms_per_char=10, ttfa=tts_ttfa_ms)
     lipsync = MockLipSync(ff=lipsync_ff_ms)
     monitor = PlaybackMonitor(MockMux())
@@ -173,6 +184,10 @@ class Conversation:
         self._turn_id = int(cursor.get("last_turn_id", 0))
         self._responding: asyncio.Task[Any] | None = None
         self._tasks: list[asyncio.Task[Any]] = []
+        # SPEC-006 row 1: stage crashes in THIS session. Two → the pod
+        # marks itself degraded and the orchestrator drains it.
+        self.stage_crashes = 0
+        self.degraded = False
         # R2 append buffer (ARCHITECTURE §9): committed events are queued and
         # flushed in the background — the media path never blocks on memoryd.
         self.append_buffer = AppendBuffer(memory, session_id)
@@ -231,16 +246,26 @@ class Conversation:
         await self._append_event("user", user_text, interrupted=False)
         prompt = await self._build_prompt(user_text)
         gen = self.bus.fresh()
-        committed = await run_response(
-            gen,
-            self.bus,
-            self.stages,
-            prompt,
-            self._turn_id,
-            self.ledger,
-            on_caption=self._send_caption,
-            metrics=self.metrics,
-        )
+        try:
+            committed = await run_response(
+                gen,
+                self.bus,
+                self.stages,
+                prompt,
+                self._turn_id,
+                self.ledger,
+                on_caption=self._send_caption,
+                metrics=self.metrics,
+            )
+        except StageCrashError as crash:
+            # SPEC-006 row 1: a pipeline stage crashed mid-turn. run_response
+            # already aborted the sibling stages cleanly (AbortBus) and
+            # flushed the mux — resolve the INV-1 partial, emit the
+            # `stage_error` note (no user text), speak the fixed recovery
+            # utterance, and return to listening. Two crashes in one session
+            # mark the pod degraded so the orchestrator drains it.
+            await self._recover_stage_crash(crash)
+            return
         await self._send_caption_final(self._turn_id)
         await self._append_event("assistant", committed.text, interrupted=False)
         log.info(
@@ -248,6 +273,38 @@ class Conversation:
             self._turn_id,
             len(committed.text),
             committed.text[:60],
+        )
+
+    async def _recover_stage_crash(self, crash: StageCrashError) -> None:
+        """SPEC-006 row 1 recovery: note + fixed utterance + re-listen."""
+        self.stage_crashes += 1
+        if self.stage_crashes >= 2:
+            self.degraded = True
+            log.warning(
+                "pod degraded: %d stage crashes in session %s",
+                self.stage_crashes,
+                self.session_id,
+            )
+        # INV-1: commit exactly what played before the crash (run_response's
+        # abort flushed the mux and attached the PlayedSpans), as an
+        # interrupted turn — the transcript never claims unheard speech.
+        partial = self.monitor.partial()
+        partial_text = committed_text(self.ledger, crash.played, partial)
+        if partial_text:
+            await self._append_event("assistant", partial_text, interrupted=True)
+        # The note records the failure; NO user text (OBSERVABILITY).
+        await self._append_note(
+            "stage_error",
+            {"stage": crash.stage, "crashes": self.stage_crashes},
+        )
+        # Speak the fixed recovery utterance (SPEC-006 row 1) and re-listen.
+        await self._append_event("assistant", RECOVERY_UTTERANCE, interrupted=False)
+        await self._send_caption_final(self._turn_id)
+        log.warning(
+            "stage crash recovered turn=%d stage=%s crashes=%d",
+            self._turn_id,
+            crash.stage,
+            self.stage_crashes,
         )
 
     async def _barge_in(self) -> None:
@@ -288,6 +345,25 @@ class Conversation:
         }
         # R2: enqueue and return — the flusher drains to memoryd with
         # retry/backoff. The media path never awaits memoryd here.
+        self.append_buffer.enqueue(event)
+
+    async def _append_note(self, kind: str, meta: dict) -> None:
+        """System note event (SPEC-006 row 1): `kind:note`, NO user text.
+
+        The `stage_error` note records the failure for the durable log
+        without echoing transcript content (OBSERVABILITY redaction). The
+        recovery utterance is appended separately as an assistant event.
+        """
+        event = {
+            "v": 1,
+            "session_id": self.session_id,
+            "turn_id": self._turn_id,
+            "ts": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+            "role": "system",
+            "kind": "note",
+            "text": "",
+            "meta": meta,
+        }
         self.append_buffer.enqueue(event)
 
     async def _build_prompt(self, user_text: str) -> str:

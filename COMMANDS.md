@@ -17,6 +17,7 @@ row says otherwise. Package managers: `cargo` (Rust workspace), `pip` inside
 | Unit tests | `sh scripts/test-unit.sh` | `UNIT OK` |
 | Integration tests | `sh scripts/test-integration.sh` | `INTEGRATION OK` (needs dev services) |
 | E2E tests | `sh scripts/test-e2e.sh` | `E2E OK` (single-pod loopback, mock GPU stages) |
+| Chaos suite | `sh scripts/chaos.sh` (EP-007) | `CHAOS OK` (kill_pod_midturn, memoryd_pause, redis_loss_rebuild, stage_crash, torn_write_fsck) |
 | Build | `sh scripts/build.sh` | `BUILD OK` (release binaries + pod wheel + docker image if DOCKER=1) |
 | Security check | `sh scripts/security-check.sh` | `SECURITY OK` (secret scan + redaction test) |
 | Dependency audit | `sh scripts/dependency-audit.sh` | `AUDIT OK` (`cargo audit`, `pip-audit`) |

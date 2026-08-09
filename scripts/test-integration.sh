@@ -15,7 +15,7 @@ if [ -f Cargo.toml ]; then
 else echo "integration: SKIP rust"; fi
 if [ -d pod/.venv ] && [ -d pod/tests ]; then
   if grep -RIn -e 'integration' pod/tests >/dev/null 2>&1; then
-    pod/.venv/bin/pytest pod -q -m integration
+    sh scripts/pytest-gate.sh pod -q -m integration
   else
     echo "integration: SKIP python (no integration-marked tests yet — EP-003)"
   fi

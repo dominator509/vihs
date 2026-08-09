@@ -4,6 +4,6 @@ set -eu
 cd "$(dirname "$0")/.."
 if [ -f Cargo.toml ]; then cargo test --workspace --lib --bins; else echo "unit: SKIP rust"; fi
 if [ -d pod/.venv ] && [ -d pod/tests ]; then
-  pod/.venv/bin/pytest pod -q -m "not integration and not e2e"
+  sh scripts/pytest-gate.sh pod -q -m "not integration and not e2e"
 else echo "unit: SKIP python"; fi
 echo "UNIT OK"

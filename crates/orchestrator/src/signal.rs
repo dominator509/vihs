@@ -76,6 +76,20 @@ pub fn validate_client_frame(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// SPEC-006 signaling row: classify one inbound client frame as a strike.
+/// Returns Ok(()) when the frame is clean, or Err(reason) when it is
+/// schema/size abuse. The live signal route counts strikes and closes the
+/// WS after MAX_STRIKES (3), matching `client_read_loop`'s contract.
+pub fn strike_reason(text: &str, v: Option<&Value>) -> Result<(), String> {
+    if text.len() > MAX_FRAME_BYTES {
+        return Err(format!("frame exceeds {} bytes", MAX_FRAME_BYTES));
+    }
+    match v {
+        Some(v) => validate_client_frame(v),
+        None => Err("invalid JSON".into()),
+    }
+}
+
 /// Relay one client frame to the pod (or produce a server→client frame).
 /// Returns the frame to forward pod-ward, or None if it's terminal.
 pub fn client_to_pod(v: &Value) -> Result<Option<Value>, String> {
@@ -173,6 +187,31 @@ mod tests {
         assert!(validate_client_frame(&json!({"t":"ice","candidate":{"a":1}})).is_ok());
         assert!(validate_client_frame(&json!({"t":"bogus"})).is_err());
         assert!(validate_client_frame(&json!({"t":"caption","delta":"x"})).is_err());
+    }
+
+    #[test]
+    fn strike_reason_clean_frame_ok() {
+        let text = r#"{"t":"offer","sdp":"v=0"}"#;
+        let v: Value = serde_json::from_str(text).unwrap();
+        assert!(strike_reason(text, Some(&v)).is_ok());
+    }
+
+    #[test]
+    fn strike_reason_invalid_json_is_strike() {
+        assert!(strike_reason("not json", None).is_err());
+        // Parseable but schema-invalid is also a strike.
+        let v: Value = serde_json::from_str(r#"{"t":"bogus"}"#).unwrap();
+        assert!(strike_reason(r#"{"t":"bogus"}"#, Some(&v)).is_err());
+    }
+
+    #[test]
+    fn strike_reason_oversize_frame_is_strike() {
+        let big = "x".repeat(MAX_FRAME_BYTES + 1);
+        assert!(strike_reason(&big, None).is_err());
+        // A small valid frame is fine (the cap is strict `>` on total
+        // frame bytes; JSON overhead counts toward it).
+        let v: Value = json!({"t":"offer","sdp":"v=0"});
+        assert!(strike_reason(r#"{"t":"offer","sdp":"v=0"}"#, Some(&v)).is_ok());
     }
 
     #[test]

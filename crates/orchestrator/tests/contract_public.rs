@@ -368,6 +368,83 @@ async fn internal_health_contract() {
     assert_eq!(body["ok"], true);
 }
 
+/// SPEC-006 row 1: a pod reporting `degraded:true` on its health ping must
+/// be drained by the orchestrator (no new assignments; existing sessions
+/// finish, then the scaler replaces it).
+#[tokio::test]
+async fn internal_health_degraded_drains_pod() {
+    let st = state().await;
+    let tok = mint(&st, "pod-hd", Scope::Pod).await;
+    let app = app(st.clone());
+    let (_, _) = send_json(
+        &app,
+        "POST",
+        "/internal/pods/register",
+        bearer(&tok),
+        Some(json!({"pod_id": "pod-hd", "addr": "127.0.0.1:9003", "cap": 2})),
+    )
+    .await;
+    // Ready → healthy pod is assignable (needs a live assign channel).
+    let id = PodId("pod-hd".to_string());
+    st.registry.ready(&id);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    st.pod_assign.senders.insert("pod-hd".to_string(), tx);
+    assert!(orchestrator::router::pick(&st.registry, u32::MAX, &st.pod_assign).is_some());
+
+    // Pod reports degraded (2+ stage crashes in a session) → orchestrator
+    // drains it.
+    let (status, body) = send_json(
+        &app,
+        "POST",
+        "/internal/pods/pod-hd/health",
+        bearer(&tok),
+        Some(json!({"fill": 1, "degraded": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["ok"], true);
+
+    // Draining → excluded from assignment picks.
+    assert!(
+        orchestrator::router::pick(&st.registry, u32::MAX, &st.pod_assign).is_none(),
+        "degraded pod must be drained and excluded from assignment picks"
+    );
+}
+
+/// A HEALTHY pod reporting degraded:false must NOT be drained.
+#[tokio::test]
+async fn internal_health_not_degraded_keeps_ready() {
+    let st = state().await;
+    let tok = mint(&st, "pod-ok", Scope::Pod).await;
+    let app = app(st.clone());
+    let (_, _) = send_json(
+        &app,
+        "POST",
+        "/internal/pods/register",
+        bearer(&tok),
+        Some(json!({"pod_id": "pod-ok", "addr": "127.0.0.1:9004", "cap": 2})),
+    )
+    .await;
+    let id = PodId("pod-ok".to_string());
+    st.registry.ready(&id);
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
+    st.pod_assign.senders.insert("pod-ok".to_string(), tx);
+
+    let (status, body) = send_json(
+        &app,
+        "POST",
+        "/internal/pods/pod-ok/health",
+        bearer(&tok),
+        Some(json!({"fill": 1, "degraded": false})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(
+        orchestrator::router::pick(&st.registry, u32::MAX, &st.pod_assign).is_some(),
+        "healthy pod must remain assignable"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // M4 — admin drain + static client serving.
 // ---------------------------------------------------------------------------

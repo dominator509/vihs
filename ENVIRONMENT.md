@@ -45,6 +45,8 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat endpoint | reachable in real mode |
 | VIHS_REAL_STAGES | no | dev | 0 | N | 1 = real GPU stages | 0/1 |
 | VIHS_MOCK_ANSWERS | no | dev | ["...","..."] | N | scripted mock-LLM answers per turn (E2E) | JSON array of strings |
+| VIHS_MOCK_LLM_TTFT_MS / VIHS_MOCK_TTS_TTFA_MS / VIHS_MOCK_LIPSYNC_FF_MS | no | dev | 0 | N | mock-stage latency injection (EP-007 M4 capacity harness CI mode) | ms int |
+| VIHS_FAULT | no | dev | (unset) | N | env-gated pod fault hook (EP-007 M5): `stage_crash` wraps the LLM so its first token raises (SPEC-006 row 1 chaos drill) | `stage_crash` |
 | TURN_URL / TURN_USER / TURN_PASS | no | stage,prod | turn:host:3478 | S(creds) | coturn relay | set together |
 | RUST_LOG / VIHS_POD_LOG | no | all | info | N | log levels | valid filter |
 | VIHS_CLIENT_DIR | no | dev | client/ | N | serve client HTML/JS from this dir instead of the embedded copy (EP-006 M5 dev override) | dir containing index.html + session.js |

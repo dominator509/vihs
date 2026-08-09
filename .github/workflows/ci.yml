@@ -31,5 +31,15 @@ jobs:
       - name: Full verification
         run: sh scripts/verify.sh
 
+      # EP-007 M5 (GAP-M5-4): chaos + capacity are EXPLICIT steps so a
+      # failure in the fault-injection suite or the load harness is
+      # distinguishable in the workflow UI (they also run inside
+      # verify.sh — these steps are the named, visible gate).
+      - name: Chaos suite (fault injection, SPEC-006)
+        run: sh scripts/chaos.sh
+
+      - name: Capacity load harness (CI mode)
+        run: sh scripts/loadtest-capacity.sh
+
       - name: Production readiness (automated subset)
         run: sh scripts/production-readiness-check.sh

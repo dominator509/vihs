@@ -64,7 +64,7 @@ cleaned by dev-services down/up (dev only).
 
 ## 12. Progress
 - [x] M1 pod kill  - [x] M2 memoryd pause  - [x] M3 torn/rebuild
-- [x] M4 capacity harness  - [ ] M5 audit+CI
+- [x] M4 capacity harness  - [x] M5 audit+CI
 
 M1 notes (validation `sh scripts/chaos.sh` = kill_pod_midturn OK / CHAOS OK;
 full verify.sh includes the chaos gate):
@@ -178,7 +178,75 @@ verify.sh includes the capacity gate via scripts/loadtest-capacity.sh):
   unknown connection rejected). e2e connect/convo/authframe/resume green
   (resume log proves assign → revoke on disconnect → re-assign resume=True).
 
+M5 notes (validation `sh scripts/verify.sh` VERIFY OK with chaos
+included; coverage audit vs SPEC-006/TESTING.md):
+- COVERAGE AUDIT (SPEC-006 "Failure states by subsystem"): rows 2-5
+  (pod death, memoryd down, Redis down, chain verification) already had
+  green chaos tests; rows 1 and 6 had NEITHER a test NOR an
+  implementation. Logged in `.agent/execplans/EP-007-M5-gap-log.md`
+  before fixing.
+- GAP-M5-1 (SPEC-006 row 1 — pipeline stage crash mid-turn): was
+  completely unimplemented — a stage exception escaped `run_response`
+  and killed the response task. IMPLEMENTED:
+  - `flow.py`: `StageCrashError(stage, original)` typed exception +
+    `_tag_stage` wraps each stage task (catches Exception, NOT
+    BaseException, so CancelledError/barge-in still propagates);
+    `run_response` aborts the remaining stages cleanly (AbortBus +
+    mux flush) and attaches the PlayedSpans to the exception.
+  - `conversation.py`: `_handle_turn` catches StageCrashError →
+    `_recover_stage_crash` — commits the INV-1 partial (exact played
+    text), emits `kind:note` `stage_error` event (NO user text, per
+    OBSERVABILITY), speaks the fixed recovery utterance
+    (`RECOVERY_UTTERANCE`), returns to listening. `stage_crashes`
+    counter; at 2 → `degraded=True`.
+  - Pod /health exposes `degraded` + `stage_crashes`; orchestrator
+    `pod_health` drains a degraded pod (registry.drain → no new
+    assignments, existing sessions finish).
+  - Fault hook: `VIHS_FAULT=stage_crash` wraps the mock LLM so its
+    first streamed token raises (deterministic, CI-safe).
+  - Tests: 5 pod unit tests (StageCrashError stage name, clean abort,
+    cancellation-safety, note+utterance, degrade-after-2, no-note on
+    clean turn) + 2 orchestrator tests (degraded→drain, healthy→stays
+    ready) + NEW chaos drill `tests/chaos/stage_crash.py` (public
+    surfaces: 2 crashed turns → transcript has recovery utterance →
+    pod /health degraded → orchestrator marks pod draining). GREEN.
+- GAP-M5-2 (SPEC-006 row 6 — signaling abuse): the 3-strike mechanism
+  existed only in the UNUSED `client_read_loop`; the live signal route
+  silently dropped invalid frames. IMPLEMENTED: the c2p pump now counts
+  strikes on oversize (>16 KiB) / invalid-JSON / schema-invalid frames
+  and closes with a `bad_signal` error frame after MAX_STRIKES (3);
+  extracted `strike_reason` (single source of truth) + 3 unit tests.
+- GAP-M5-3 (flaky mechanism): TESTING.md policy had no implementation.
+  NEW `flaky.txt` (empty, documented) + `scripts/pytest-gate.sh`:
+  runs pytest normally (the test ALWAYS runs); a failure matching a
+  flaky.txt nodeid is NON-GATING (warning + 5-working-day reminder);
+  any other failure fails the gate. Wired into test-unit.sh +
+  test-integration.sh. Verified both paths (unquarantined failure →
+  exit 1; quarantined → exit 0 + WARN).
+- GAP-M5-4 (CI chaos job explicit): ci.yml already ran verify.sh (which
+  includes chaos since M3 + loadtest since M4); added EXPLICIT named
+  steps "Chaos suite" + "Capacity load harness" so failures are
+  distinguishable in the workflow UI.
+- Docs: ENVIRONMENT.md rows for VIHS_MOCK_*_MS (M4) + VIHS_FAULT (M5);
+  COMMANDS.md chaos row.
+
 ## 13. Surprises & Discoveries
+- M5: The coverage audit found a REAL spec row with no implementation:
+  SPEC-006 row 1 (pipeline stage crash) had zero code — a stage exception
+  would have escaped run_response and killed the conversation's response
+  task silently (no note, no recovery, no degrade). The chaos-first
+  approach (write the failure-mode test, discover the missing behavior)
+  paid off again, exactly as in M3.
+- M5: `_tag_stage` must catch `Exception`, NOT `BaseException` —
+  asyncio.CancelledError inherits BaseException, so catching BaseException
+  would convert barge-in aborts into StageCrashError and corrupt the
+  INV-1 path. The cancellation-safety unit test caught this.
+- M5: the 3-strike signaling-abuse mechanism existed ONLY in the unused
+  `client_read_loop` — dead code. The live signal route silently dropped
+  invalid frames. A mechanism is only real when the live path uses it.
+- M3/M4/M5 pattern: chaos drills + load harnesses against PUBLIC surfaces
+  keep finding real gaps the unit suites can't (M3 five gaps, M4 revoke
+  + routing, M5 stage-crash + strikes).
 - M4: The capacity harness found the assignment slot NEVER releases when a
   client disconnects — the orchestrator's signal route unbinds the relay
   but the pod only pops assignments on a `revoke` frame (SPEC-003). This
@@ -292,11 +360,32 @@ real product gaps:
   ruff clean (pod/), e2e connect/convo/authframe/resume green, live
   revoke verified in the resume log (assign → revoke → re-assign
   resume=True).
+
+M5 closed the SPEC-006 coverage audit and delivered the flaky + CI
+mechanisms:
+- Coverage matrix now 6/6: every SPEC-006 failure-state row maps to a
+  named green test (rows 1+6 were entirely missing and are now
+  implemented + tested at unit, contract, and chaos levels).
+- GAP-M5-1: pipeline stage crash — typed StageCrashError + clean AbortBus
+  abort with INV-1 played spans; conversation recovery (note + fixed
+  utterance + re-listen); 2 crashes → pod degraded → orchestrator drains.
+  NEW chaos drill stage_crash.py GREEN on public surfaces.
+- GAP-M5-2: signaling abuse 3-strike + bad_signal wired into the live
+  signal route (was dead code in client_read_loop).
+- GAP-M5-3: flaky.txt + pytest-gate.sh (non-gating quarantine, 5-working-
+  day policy) wired into unit + integration gates; both paths verified.
+- GAP-M5-4: explicit chaos + loadtest steps in ci.yml.
+- Gates green: orchestrator 76 (5 new), pod 81 (5 new), mypy clean, ruff
+  clean (pod/), chaos suite 5/5 (kill_pod_midturn, memoryd_pause,
+  redis_loss_rebuild, stage_crash, torn_write_fsck), loadtest OK, e2e
+  green.
 - Remaining risks: (1) memoryd's Redis connection has no retry/reconnect
   config — a Redis bounce requires the documented service restart; the 503
   retryable classification keeps that honest. (2) ~1 s argon2 per-append
   latency (M2 backlog, unchanged). (3) cargo-audit RUSTSECs via
-  aws-smithy (pre-existing, `|| echo` swallow).
-Next: M5 coverage audit vs TESTING.md required-tests + flaky mechanism +
-CI chaos job; the EP-010/staging capacity run needs a GPU host
-(RUNPOD_API_KEY is the only missing credential, needed at EP-009).
+  aws-smithy (pre-existing, `|| echo` swallow). (4) the live 3-strike
+  close is covered by unit tests (strike_reason) but not yet by a WS-level
+  integration test — the closed WS sends `bad_signal` and the relay tears
+  down; a future drill can assert the frame over a real socket.
+Next: EP-008 observability; the EP-010/staging capacity run needs a GPU
+host (RUNPOD_API_KEY is the only missing credential, needed at EP-009).

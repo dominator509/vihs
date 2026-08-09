@@ -95,6 +95,10 @@ class PodAgent:
             "stages_mode": mode,
             "fill": len(self._assignments),
             "cap": self.cap,
+            # SPEC-006 row 1: any assignment with 2+ stage crashes marks the
+            # pod degraded; the orchestrator drains it (stops new assigns).
+            "degraded": any(c.degraded for c in self._assignments.values()),
+            "stage_crashes": sum(c.stage_crashes for c in self._assignments.values()),
             # R2 append buffer visibility (EP-007 M2): the chaos suite asserts
             # depth rises while memoryd is paused, then drains to 0.
             "append_buffer_depth": convo.append_buffer.depth if convo else 0,
