@@ -40,6 +40,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "e2e"))
@@ -144,13 +145,38 @@ async def run_one_turn(peer) -> None:
     await peer.wait_caption(timeout=15.0)
 
 
-async def connect_peers(conn_ids: list[str]) -> list:
-    """Fresh ClientPeer per connection (M1 lesson: one WS per peer; a closed
-    peer cannot be reused) and connect all of them concurrently."""
+async def _connect_one(cid: str) -> Any:
+    """Connect one session's peer, retrying on transient upstream errors.
+
+    The RunPod proxy intermittently 404s the pod-ward signal dial (seen
+    during EP-010 M2: ~2 of 10 dials). The relay now fails fast with an
+    `upstream` error frame; a FRESH ClientPeer (new RTCPeerConnection) is
+    required per attempt — a closed peer cannot be reused (M1 lesson).
+    """
     from run_e2e import ClientPeer  # noqa: PLC0415
 
-    peers = [ClientPeer(cid) for cid in conn_ids]
-    await asyncio.gather(*(p.connect(timeout=15.0) for p in peers))
+    attempts = 3
+    for i in range(attempts):
+        peer = ClientPeer(cid)
+        try:
+            await peer.connect(timeout=15.0)
+            return peer
+        except Exception as exc:  # noqa: BLE001
+            with contextlib.suppress(Exception):
+                await peer.close()
+            if "upstream" not in str(exc):
+                raise
+            if i < attempts - 1:
+                print(f"  connect retry {i + 1}/{attempts} {cid}: {str(exc)[:100]}")
+                await asyncio.sleep(1.0 + i)
+            else:
+                raise
+
+
+async def connect_peers(conn_ids: list[str]) -> list:
+    """Fresh ClientPeer per connection (M1 lesson: one WS per peer; a closed
+    peer cannot be reused) and connect all of them concurrently."""  # noqa: D202
+    peers = list(await asyncio.gather(*(_connect_one(cid) for cid in conn_ids)))
     return peers
 
 
