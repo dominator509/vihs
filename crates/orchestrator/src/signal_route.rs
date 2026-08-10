@@ -7,6 +7,7 @@
 //! State frames are server→client.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::{
     extract::{
@@ -189,9 +190,18 @@ async fn handle_signal(
     let ws_url = format!(
         "{pod_addr_scheme}{pod_addr_host}/internal/pods/{pod_key}/signal?connection_id={connection_id}",
     );
-    let (pod_ws, _) = match tokio_tungstenite::connect_async(&ws_url).await {
-        Ok(pair) => pair,
-        Err(e) => {
+    // EP-010 M2: the pod-ward dial MUST complete within a fixed budget. The
+    // client's own state-frame wait is bounded (15s in the harness); an
+    // unbounded dial here would leave the client hanging on a silent WS with
+    // no state frame and no error. On timeout, take the same path as a
+    // failed dial: upstream error frame + revoke the assignment slot.
+    const POD_DIAL_TIMEOUT: Duration = Duration::from_secs(10);
+    tracing::info!(pod = %pod_key, url = %pod_addr_host, "relay: dialing pod signal ws");
+    let dial = async { tokio_tungstenite::connect_async(&ws_url).await };
+    let (pod_ws, _) = match tokio::time::timeout(POD_DIAL_TIMEOUT, dial).await {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(e)) => {
+            tracing::warn!(pod = %pod_key, error = %e, "relay: pod signal dial failed");
             let _ = client
                 .send(Message::Text(
                     json!({"t":"error","code":"upstream","message":e.to_string()})
@@ -201,6 +211,21 @@ async fn handle_signal(
                 .await;
             // The client can never reach the pod through this relay —
             // release the assignment slot so the session is reconnectable.
+            if let Some(tx) = st.pod_assign.senders.get(&pod_key) {
+                let _ = tx.send(crate::signal::revoke_frame(&session_id, &connection_id));
+            }
+            st.relay.unbind(&connection_id).await;
+            return;
+        }
+        Err(_elapsed) => {
+            tracing::warn!(pod = %pod_key, "relay: pod signal dial timed out");
+            let _ = client
+                .send(Message::Text(
+                    json!({"t":"error","code":"upstream","message":"pod signal dial timed out"})
+                        .to_string()
+                        .into(),
+                ))
+                .await;
             if let Some(tx) = st.pod_assign.senders.get(&pod_key) {
                 let _ = tx.send(crate::signal::revoke_frame(&session_id, &connection_id));
             }

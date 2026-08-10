@@ -15,6 +15,11 @@ Env (from .env unless overridden):
   24 / 3).
 
 Output: CAPACITY_SESSIONS_PER_GPU=N CONSTRAINT=<stage|vram> on success.
+
+Flags:
+  --keep-warm   do NOT terminate the pod in finally (operator permission for
+                iterating on the SAME config across ramp runs; the caller
+                must terminate it explicitly afterwards — hard rule).
 """
 from __future__ import annotations
 
@@ -44,6 +49,7 @@ def load_env(path: Path) -> dict[str, str]:
 
 
 def main() -> int:
+    keep_warm = "--keep-warm" in sys.argv
     env = {**os.environ, **load_env(ROOT / ".env")}
     # Process env wins for the drill-pinned keys (same contract as
     # staging-deploy.py EP-009 M5).
@@ -61,6 +67,7 @@ def main() -> int:
     llm_token = env.get("VIHS_LLM_TOKEN", "")
     dc = env.get("VIHS_RUNPOD_REGION", "US-IL-1")
     gpu = env.get("VIHS_RUNPOD_GPU", "NVIDIA GeForce RTX 4090")
+    cloud = env.get("VIHS_RUNPOD_CLOUD", "SECURE")
     release = env.get("VIHS_RELEASE", image.split(":")[-1] if ":" in image else "0.1.0")
     cap = int(env.get("VIHS_CAPACITY_CAP", "4"))
 
@@ -121,14 +128,14 @@ def main() -> int:
         "name": "vihs-capacity-4090",
         "image": image,
         "gpu": {"id": gpu, "count": 1},
-        "cloud": "SECURE",
+        "cloud": cloud,
         "dataCenterIds": [dc],
         "env": pod_env,
         "ports": [f"{POD_PORT}/http"],
         "mounts": {"network": [{"volumeId": volume_id, "path": VOLUME_DIR}]},
         "disk": 20,
     }
-    print(f"capacity: creating pod image={image} cap={cap} dc={dc}")
+    print(f"capacity: creating pod image={image} cap={cap} dc={dc} cloud={cloud}")
     code, resp = api("POST", "/v2/pods", body)
     if code != 0 or "id" not in resp:
         print(f"capacity: create pod failed: {json.dumps(resp)[:400]}", file=sys.stderr)
@@ -201,15 +208,20 @@ def main() -> int:
         print("CAPACITY OK")
         return 0
     finally:
-        print("capacity: terminating pod (no held-open billing)")
-        api("DELETE", f"/v2/pods/{pod_id}")
-        deadline = time.monotonic() + 120
-        while time.monotonic() < deadline:
-            code, resp = api("GET", f"/v2/pods/{pod_id}")
-            if resp.get("status") in ("TERMINATED", "EXITED") or "id" not in resp:
-                break
-            time.sleep(5)
-        print("capacity: pod terminated")
+        # NOTE: never `return` here — a finally-return overrides the try's
+        # exit code and a failed ramp would report success.
+        if keep_warm:
+            print("capacity: --keep-warm set — pod LEFT RUNNING (caller must terminate)")
+        else:
+            print("capacity: terminating pod (no held-open billing)")
+            api("DELETE", f"/v2/pods/{pod_id}")
+            deadline = time.monotonic() + 120
+            while time.monotonic() < deadline:
+                code, resp = api("GET", f"/v2/pods/{pod_id}")
+                if resp.get("status") in ("TERMINATED", "EXITED") or "id" not in resp:
+                    break
+                time.sleep(5)
+            print("capacity: pod terminated")
 
 
 if __name__ == "__main__":

@@ -73,10 +73,23 @@ def budget_ms(stage: str) -> int:
 
 
 def read_pod_health() -> dict:
-    """GET the pod's local /health (aggregated per-stage metrics)."""
+    """GET the pod's local /health (aggregated per-stage metrics).
+
+    The RunPod proxy URL (https://{pod}-{port}.proxy.runpod.net) sits behind
+    Cloudflare, which returns 403/1010 for the default Python-urllib
+    User-Agent. Send a browser-like UA or the health poll silently 403s and
+    the ramp times out on "pod metrics never settled" (EP-010 M2).
+    """
     addr = _re.POD_ADDR
     url = f"{addr}/health" if "://" in addr else f"http://{addr}/health"
-    with urllib.request.urlopen(url, timeout=5) as resp:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+        },
+    )
+    with urllib.request.urlopen(req, timeout=5) as resp:
         return json.loads(resp.read())
 
 

@@ -737,7 +737,16 @@ def _dump_metrics(out_dir: str) -> None:
     }
     for name, url in targets.items():
         try:
-            with _ur.urlopen(url, timeout=5.0) as resp:
+            # Browser-like UA: the RunPod proxy URL is behind Cloudflare,
+            # which 403s the Python-urllib signature (EP-010 M2 finding).
+            req = _ur.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+                },
+            )
+            with _ur.urlopen(req, timeout=5.0) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
         except Exception as exc:  # noqa: BLE001
             body = f"# scrape error: {exc}\n"
