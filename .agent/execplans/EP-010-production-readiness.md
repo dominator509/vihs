@@ -107,5 +107,17 @@ All drills re-runnable.
   budgets. Remaining: (a) amend budgets from real measurements, or (c)
   local vLLM on the pod GPU. Recommended: (a) with measured headroom
   (llm_ttft ≤3000ms, tts_ttfa ≤5000ms, e2e ≤9000ms p95), then re-derive.
+- 2026-08-10 operator chose (c) — LOCAL LLM (llama.cpp) for fast uncensored
+  roleplay. IMPLEMENTED + MEASURED (v0.2.4, Lexi-Uncensored-V2
+  Llama-3.1-8B Q4_K_M 4.9GB GGUF, llama-cpp-python 0.3.19 CUDA wheel,
+  PROVIDER=vllm → 127.0.0.1:8000): **llm_ttft = 323ms — MEETS the 400ms
+  §6 budget** (first provider to do so; deepseek 1.9–2.5s, haiku 1.2–2.5s,
+  Venice 1.9s all breached). New binding constraint: tts_ttfa 4524ms
+  (budget 300ms) — Piper TTS on CPU, not the LLM. e2e_total 4963ms.
+  Boot hardening: server-side Range (206) + curl -C - resumable GGUF
+  download with size verify; libgomp1 added to the slim image (llama.cpp
+  CUDA wheel dlopens libgomp.so.1); server-extra dep closure staged
+  (starlette-context<0.4, typing-inspection, etc). GGUF persists on the
+  volume — subsequent boots skip the 4.9GB download.
 
 ## 15. Outcomes & Retrospective
