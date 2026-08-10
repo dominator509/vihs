@@ -299,6 +299,28 @@ class PodAgent:
     async def run(self) -> None:
         host, _, port = self.pod_addr.partition(":")
         self._cache_poller = asyncio.create_task(self._cache_poller_loop())
+        # EP-010 M2: pre-warm the shared TTS voice before the first
+        # assignment — a resident model makes the FIRST session's tts_ttfa
+        # ~88ms instead of ~3.5s. Best-effort: failure falls back to the
+        # CLI path at stream time.
+        if self.real_stages:
+            try:
+                from vihs_pod.pipeline.tts import get_shared_piper  # noqa: PLC0415
+
+                model_dir = os.environ.get("VIHS_MODEL_DIR", "")
+                voice = os.environ.get(
+                    "VIHS_TTS_VOICE",
+                    os.path.join(model_dir, "tts", "en_US-lessac-medium.onnx")
+                    if model_dir
+                    else "en_US-lessac-medium.onnx",
+                )
+                await get_shared_piper(
+                    binary=os.environ.get("VIHS_TTS_BIN", "piper"),
+                    voice=voice,
+                    cuda=os.environ.get("VIHS_TTS_CUDA", "0") == "1",
+                ).warmup()
+            except Exception as exc:  # noqa: BLE001 — boot must not fail
+                log.warning("tts warmup skipped: %s", exc)
         surface_task = asyncio.create_task(
             serve_pod_surface(
                 host or "127.0.0.1",
@@ -407,6 +429,12 @@ async def _shutdown(agent: PodAgent) -> None:
     for convo in list(agent._assignments.values()):
         await convo.stop()
     agent._assignments.clear()
+    # EP-010 M2: the pod-level shared piper lives for the pod lifetime —
+    # close it HERE, at shutdown, not per revoke.
+    with contextlib.suppress(Exception):
+        from vihs_pod.pipeline.tts import close_pod_piper  # noqa: PLC0415
+
+        await close_pod_piper()
     asyncio.get_event_loop().stop()
 
 

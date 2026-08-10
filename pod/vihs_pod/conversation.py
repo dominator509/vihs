@@ -109,7 +109,7 @@ def build_stages(
         from vihs_pod.pipeline.lipsync import StubLipSync
         from vihs_pod.pipeline.llm import VLLMLLM, AxiomGatewayLLM
         from vihs_pod.pipeline.mux import GStreamerMux
-        from vihs_pod.pipeline.tts import PiperTTS
+        from vihs_pod.pipeline.tts import get_shared_piper
 
         provider = os.environ.get("PROVIDER", "mock")
         llm_url = os.environ.get("VIHS_LLM_URL", "http://127.0.0.1:8000/v1")
@@ -143,15 +143,16 @@ def build_stages(
                 compute_type=os.environ.get("VIHS_STT_COMPUTE", "float16"),
                 model_dir=os.path.join(model_dir, "stt"),
             )
-            tts: Any = PiperTTS(
+            tts: Any = get_shared_piper(
                 binary=os.environ.get("VIHS_TTS_BIN", "piper"),
                 voice=os.environ.get(
                     "VIHS_TTS_VOICE", os.path.join(model_dir, "tts", "en_US-lessac-medium.onnx")
                 ),
+                cuda=os.environ.get("VIHS_TTS_CUDA", "0") == "1",
             )
         else:
             stt = None
-            tts = PiperTTS()
+            tts = get_shared_piper()
         lipsync: Any = StubLipSync()
         mux: Any = GStreamerMux()
         monitor = PlaybackMonitor(mux)
@@ -424,8 +425,12 @@ class Conversation:
         await self.append_buffer.stop()
         # EP-009: close real stage subprocesses (persistent piper keeps the
         # model loaded across clauses — must be torn down at revoke).
+        # EP-010 M2: the pod-level SHARED piper is NOT closed here — closing
+        # it per session forced a ~3.5s ONNX reload on every revoke (the
+        # 4252ms tts_ttfa wall). Only pod shutdown closes it
+        # (close_pod_piper in agent.py).
         tts_close = getattr(self.stages.tts, "close", None)
-        if tts_close is not None:
+        if tts_close is not None and not getattr(self.stages.tts, "pod_shared", False):
             with contextlib.suppress(Exception):
                 await tts_close()
         await self.pc.close()
