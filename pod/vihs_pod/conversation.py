@@ -118,7 +118,9 @@ def build_stages(
             llm: Any = AxiomGatewayLLM(
                 url=llm_url,
                 token=llm_token,
+                model=os.environ.get("VIHS_LLM_MODEL") or None,
                 provider=os.environ.get("VIHS_LLM_PROVIDER", "") or None,
+                egress=os.environ.get("VIHS_LLM_EGRESS", "1") != "0",
                 verify=os.environ.get("VIHS_LLM_TLS_VERIFY", "1") != "0",
             )
         elif provider == "vllm":

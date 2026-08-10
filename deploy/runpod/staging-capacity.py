@@ -121,6 +121,10 @@ def main() -> int:
         pod_env["VIHS_LLM_TOKEN"] = llm_token
     if env.get("VIHS_LLM_PROVIDER"):
         pod_env["VIHS_LLM_PROVIDER"] = env["VIHS_LLM_PROVIDER"]
+    if env.get("VIHS_LLM_MODEL"):
+        pod_env["VIHS_LLM_MODEL"] = env["VIHS_LLM_MODEL"]
+    if env.get("VIHS_LLM_EGRESS"):
+        pod_env["VIHS_LLM_EGRESS"] = env["VIHS_LLM_EGRESS"]
     if env.get("VIHS_LLM_TLS_VERIFY", "1") == "0":
         pod_env["VIHS_LLM_TLS_VERIFY"] = "0"
 

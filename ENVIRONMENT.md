@@ -31,6 +31,9 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_ADMIN_TOKEN | no | dev | (random 32B b64url) | S | bootstrap admin token seeded at startup so POST /admin/tokens is reachable | 32-byte b64url token |
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat OR AXIOM gateway base (ADR-012) | reachable in real mode |
 | VIHS_LLM_TOKEN | pod | stage,prod | (bearer for AXIOM gateway) | S | brain-stage auth token | non-empty when PROVIDER=axiom-gateway |
+| VIHS_LLM_PROVIDER | pod | stage,prod | (gateway registry name) | N | explicit AXIOM gateway provider key (e.g. deepseek, anthropic, openai) | registry name |
+| VIHS_LLM_MODEL | pod | stage,prod | (gateway provider default) | N | explicit model id for the AXIOM gateway (e.g. claude-haiku-4-5, gpt-4o-mini) — EP-010 M2 fast-model path | model id the gateway accepts |
+| VIHS_LLM_EGRESS | pod | stage,prod | 1 | N | route gateway calls through the model's L2.6 egress sidecar (1) or direct (0) | 0/1 |
 | VIHS_TOKEN_PEPPER | yes | all | (random 32B b64url) | S | SHARED token hash pepper -- MUST be identical in orchestrator AND memoryd (EP-006 M3); memoryd refuses to start without it | ≥32 bytes decoded |
 | POD_MAX_SESSIONS | yes | all | 2 | N | derived concurrency cap | int ≥1 (ADR-010) |
 | SCALE_UP_FILL | no | all | 0.8 | N | preemptive scale threshold (4/5) | 0<x<1 |
