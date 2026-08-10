@@ -34,6 +34,8 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_LLM_PROVIDER | pod | stage,prod | (gateway registry name) | N | explicit AXIOM gateway provider key (e.g. deepseek, anthropic, openai) | registry name |
 | VIHS_LLM_MODEL | pod | stage,prod | (gateway provider default) | N | explicit model id for the AXIOM gateway (e.g. claude-haiku-4-5, gpt-4o-mini) — EP-010 M2 fast-model path | model id the gateway accepts |
 | VIHS_LLM_EGRESS | pod | stage,prod | 1 | N | route gateway calls through the model's L2.6 egress sidecar (1) or direct (0) | 0/1 |
+| VIHS_LLAMA_GGUF | pod | stage,prod | (unset) | N | local LLM bootstrap: absolute path to a GGUF on the model volume; when set, slim-boot installs llama-cpp-python and starts the OpenAI-compat server on 127.0.0.1:8000 (EP-010 M2 option c) | abs path, e.g. /workspace/models/llama/Lexi-Q4_K_M.gguf |
+| VIHS_LLAMA_GGUF_URL | pod | stage,prod | (unset) | N | where slim-boot fetches the GGUF if the volume path is missing (operator mirror preferred) | https/http URL |
 | VIHS_TOKEN_PEPPER | yes | all | (random 32B b64url) | S | SHARED token hash pepper -- MUST be identical in orchestrator AND memoryd (EP-006 M3); memoryd refuses to start without it | ≥32 bytes decoded |
 | POD_MAX_SESSIONS | yes | all | 2 | N | derived concurrency cap | int ≥1 (ADR-010) |
 | SCALE_UP_FILL | no | all | 0.8 | N | preemptive scale threshold (4/5) | 0<x<1 |

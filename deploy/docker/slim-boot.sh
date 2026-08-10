@@ -33,6 +33,43 @@ if [ ! -f "$MARKER" ]; then
 fi
 
 echo "slim-boot: starting agent"
+# Local LLM bootstrap (EP-010 M2 option c): when VIHS_LLAMA_GGUF points at a
+# GGUF on the model volume, install llama-cpp-python from the wheel mirror,
+# download the model if missing, and start the OpenAI-compat server on
+# 127.0.0.1:8000 (the pod's PROVIDER=vllm adapter targets that URL by
+# default). GPU offload all layers (-1); 4096 ctx; prompt cache on (VIHS
+# sends the same preamble every turn, so repeated prefill is skipped).
+if [ -n "${VIHS_LLAMA_GGUF:-}" ]; then
+    echo "slim-boot: local LLM enabled (GGUF: $VIHS_LLAMA_GGUF)"
+    pip install --no-index --trusted-host 66.94.123.250 --find-links "$WHEEL_BASE" \
+        "llama-cpp-python[server]==0.3.19"
+    if [ ! -f "$VIHS_LLAMA_GGUF" ]; then
+        mkdir -p "$(dirname "$VIHS_LLAMA_GGUF")"
+        echo "slim-boot: downloading GGUF from ${VIHS_LLAMA_GGUF_URL:-<unset>}"
+        curl -sL --max-time 3600 -o "${VIHS_LLAMA_GGUF}.part" "${VIHS_LLAMA_GGUF_URL}"
+        mv "${VIHS_LLAMA_GGUF}.part" "$VIHS_LLAMA_GGUF"
+    fi
+    python -m llama_cpp.server \
+        --model "$VIHS_LLAMA_GGUF" \
+        --model_alias default \
+        --host 127.0.0.1 --port 8000 \
+        --n_gpu_layers -1 \
+        --n_ctx 4096 \
+        --cache true > /tmp/llama-server.log 2>&1 &
+    LLAMA_PID=$!
+    i=0
+    until curl -s --max-time 2 http://127.0.0.1:8000/v1/models >/dev/null 2>&1; do
+        i=$((i+1))
+        if [ "$i" -gt 300 ]; then
+            echo "slim-boot: llama-server failed to start; log:" >&2
+            tail -50 /tmp/llama-server.log >&2
+            exit 1
+        fi
+        sleep 1
+    done
+    echo "slim-boot: llama-server ready (pid $LLAMA_PID)"
+fi
+
 if [ -n "${VIHS_LOG_POST:-}" ]; then
     # Tee agent stdout into a log-forwarder that POSTs each line to the
     # operator report server. The agent's own prints stay on stdout too

@@ -61,6 +61,10 @@ def main() -> int:
         "VIHS_LLM_PROVIDER",
         "VIHS_LLM_MODEL",
         "VIHS_LLM_EGRESS",
+        "VIHS_LLM_URL",
+        "PROVIDER",
+        "VIHS_LLAMA_GGUF",
+        "VIHS_LLAMA_GGUF_URL",
     ):
         if _k in os.environ:
             env[_k] = os.environ[_k]
@@ -110,7 +114,7 @@ def main() -> int:
         "VIHS_POD_ID": "staging-4090",
         "POD_MAX_SESSIONS": str(cap),
         "VIHS_REAL_STAGES": "1",
-        "PROVIDER": "axiom-gateway",
+        "PROVIDER": env.get("PROVIDER", "axiom-gateway"),
         "VIHS_MODEL_DIR": VOLUME_DIR,
         "VIHS_ORCH_ADDR": orch,
         "VIHS_MEMORYD_ADDR": env.get("VIHS_MEMORYD_PUBLIC_ADDR", ""),
@@ -135,6 +139,10 @@ def main() -> int:
         pod_env["VIHS_LLM_EGRESS"] = env["VIHS_LLM_EGRESS"]
     if env.get("VIHS_LLM_TLS_VERIFY", "1") == "0":
         pod_env["VIHS_LLM_TLS_VERIFY"] = "0"
+    if env.get("VIHS_LLAMA_GGUF"):
+        pod_env["VIHS_LLAMA_GGUF"] = env["VIHS_LLAMA_GGUF"]
+    if env.get("VIHS_LLAMA_GGUF_URL"):
+        pod_env["VIHS_LLAMA_GGUF_URL"] = env["VIHS_LLAMA_GGUF_URL"]
 
     body: dict = {
         "name": "vihs-capacity-4090",
