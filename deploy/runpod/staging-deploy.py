@@ -104,6 +104,15 @@ def main() -> int:
         "VIHS_STT_COMPUTE": "float16",
         "VIHS_TTS_VOICE": f"{VOLUME_DIR}/tts/en_US-lessac-medium.onnx",
         "VIHS_POD_LOG": "info",
+        # EP-009 M4 diagnosis: when set, slim-boot POSTs every agent stdout
+        # line to the operator report server so pod-side failures are
+        # observable without RunPod console access.
+        "VIHS_LOG_POST": env.get("VIHS_LOG_POST", "http://66.94.123.250:8099/report"),
+        # ctranslate2 dlopens libcublas.so.12 for GPU STT, but the image
+        # (nvidia/cuda:12.9.2-base) ships no libcublas. Staged on the volume
+        # by cublas-stage.py; extend LD_LIBRARY_PATH (image default kept so
+        # libcudart via /usr/local/cuda/lib64 still resolves).
+        "LD_LIBRARY_PATH": f"{VOLUME_DIR}/cublas:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64",
     }
     if llm_url:
         pod_env["VIHS_LLM_URL"] = llm_url
@@ -138,9 +147,14 @@ def main() -> int:
     t0 = time.monotonic()
 
     try:
-        # 2. Wait for the pod's public address (runtime appears when running).
-        #    Image pull from GHCR can take 10-20 min on RunPod (observed), so
-        #    the deadline covers pull + boot, not just boot.
+        # 2. Wait briefly for the pod's runtime to appear (container start).
+        #    NOTE: pod_addr is INFORMATIONAL ONLY — the pod registers OUTBOUND
+        #    to the orchestrator (VIHS_ORCH_ADDR) and the remote smoke talks to
+        #    the orchestrator locally (orch_local). Pods here run with
+        #    globalNetworking disabled, so no publicIp is injected and the
+        #    runtime port ip is internal (100.x). We therefore do NOT fail the
+        #    deploy when no routable addr exists — the ready check + smoke in
+        #    phases 3-4 are what matter.
         pod_addr: str | None = None
         deadline = time.monotonic() + 2700
         while time.monotonic() < deadline:
@@ -149,16 +163,17 @@ def main() -> int:
             ports = runtime.get("ports") or []
             ip = runtime.get("publicIp") or runtime.get("ip") or ""
             for p in ports:
-                if str(p.get("privatePort")) == str(POD_PORT):
-                    pod_addr = f"{ip}:{p.get('publicPort', POD_PORT)}"
+                if str(p.get("private")) == str(POD_PORT):
+                    pod_addr = f"{ip}:{p.get('public', POD_PORT)}"
                     break
             if pod_addr:
                 break
+            # Non-fatal: keep polling for the container to appear, but don't
+            # require an address — just detect the runtime started.
+            if runtime.get("uptime", 0) or 0 > 0:
+                break
             time.sleep(5)
-        if not pod_addr:
-            print(f"deploy: pod {pod_id} never got a public addr — see console", file=sys.stderr)
-            return 1
-        print(f"deploy: pod public addr {pod_addr} (cold-start clock running)")
+        print(f"deploy: pod runtime seen (addr={'none' if not pod_addr else pod_addr}; informational)")
 
         # 3. Wait for orchestrator to mark it Ready (registration + assign WS).
         admin_tok = env.get("VIHS_ADMIN_TOKEN", "")

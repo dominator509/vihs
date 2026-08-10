@@ -13,6 +13,7 @@ synth work).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import AsyncIterator
 
 from vihs_pod.pipeline.protocols import AudioChunk
@@ -77,9 +78,23 @@ class PiperTTS:
                 covered += chars_per_chunk
                 remaining -= this_ms
         finally:
+            # Keep the process alive across clauses (EP-009): piper reads
+            # lines from stdin until EOF, so ONE process serves the whole
+            # turn. Terminating per clause forced a full model reload per
+            # clause (~3.3s local, more from the network volume) and blew
+            # the turn budget. close() below is the real teardown path.
+            pass
+
+    async def close(self) -> None:
+        """Terminate the persistent piper process (revoke path)."""
+        if self._proc is not None:
+            proc = self._proc
+            self._proc = None
             if proc.returncode is None:
                 proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=1.0)
                 except TimeoutError:
                     proc.kill()
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(proc.wait(), timeout=1.0)

@@ -173,6 +173,13 @@ fn app(state: Arc<AppState>) -> Router {
 
 #[tokio::main]
 async fn main() {
+    // Both rustls crypto providers (ring via reqwest, aws-lc-rs via
+    // tokio-tungstenite's rustls-tls-webpki-roots) are compiled into the
+    // binary — rustls cannot auto-select and panics at first TLS use.
+    // Install ring as the process default (already a dep of reqwest's
+    // rustls-tls; lighter than aws-lc-rs). Must run before any connect.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

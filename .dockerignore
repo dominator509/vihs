@@ -7,4 +7,7 @@ pod/.venv
 pod/build
 pod/*.egg-info
 **/__pycache__
+pod/.mypy_cache
+pod/.pytest_cache
+pod/.ruff_cache
 node_modules

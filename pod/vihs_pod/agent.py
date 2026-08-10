@@ -65,9 +65,11 @@ class PodAgent:
         real_stages: bool = False,
         memoryd_addr: str = "127.0.0.1:8091",
         mock_answers: list[str] | None = None,
+        advertise: str | None = None,
     ) -> None:
         self.pod_id = pod_id
         self.pod_addr = pod_addr
+        self.advertise = advertise or pod_addr
         self.orch_addr = orch_addr
         self.token = token
         self.cap = max(1, cap)
@@ -185,7 +187,7 @@ class PodAgent:
     async def register(self) -> None:
         body = {
             "pod_id": self.pod_id,
-            "addr": self.pod_addr,
+            "addr": self.advertise,
             "cap": self.cap,
             "versions": {"pod": "0.1.0", "stages": "mock" if not self.real_stages else "real"},
         }
@@ -335,13 +337,25 @@ def main(argv: list[str] | None = None) -> int:
         help="run with mock stage implementations (CI-safe)",
     )
     parser.add_argument("--pod-id", default=os.environ.get("VIHS_POD_ID", "local-pod"))
-    # EP-009 M4: on RunPod the pod must advertise a PUBLIC addr so the
-    # orchestrator's pod-ward signal WS can reach it. RunPod injects
-    # RUNPOD_PUBLIC_IP; prefer it over the loopback default when set.
-    default_addr = os.environ.get("VIHS_POD_ADDR", DEFAULT_POD_ADDR)
-    if default_addr == DEFAULT_POD_ADDR and os.environ.get("RUNPOD_PUBLIC_IP"):
-        default_addr = f"{os.environ['RUNPOD_PUBLIC_IP']}:8093"
-    parser.add_argument("--addr", default=default_addr)
+    # EP-009 M4: on RunPod the pod must advertise a reachable addr so the
+    # orchestrator's pod-ward signal WS can reach it. Two cases:
+    #   - public networking (RUNPOD_PUBLIC_IP injected): advertise IP:8093
+    #   - proxy networking (globalNetworking disabled): advertise the RunPod
+    #     HTTP proxy URL https://{pod_id}-{port}.proxy.runpod.net — the only
+    #     externally routable face of the pod's 8093 surface.
+    # The BIND addr stays 0.0.0.0:8093 (container-local); the ADVERTISE addr
+    # is what register() reports so the orchestrator can dial back.
+    default_bind = os.environ.get("VIHS_POD_BIND", "0.0.0.0:8093")
+    runpod_id = os.environ.get("RUNPOD_POD_ID", "")
+    runpod_ip = os.environ.get("RUNPOD_PUBLIC_IP", "")
+    if runpod_id and not runpod_ip:
+        advertise = f"https://{runpod_id}-8093.proxy.runpod.net"
+    elif runpod_ip:
+        advertise = f"{runpod_ip}:8093"
+    else:
+        advertise = os.environ.get("VIHS_POD_ADDR", DEFAULT_POD_ADDR)
+    parser.add_argument("--bind", default=default_bind)
+    parser.add_argument("--advertise", default=advertise)
     parser.add_argument("--orch", default=os.environ.get("VIHS_ORCH_ADDR", DEFAULT_ORCH))
     parser.add_argument("--token", default=os.environ.get("VIHS_POD_TOKEN", DEFAULT_TOKEN))
     parser.add_argument(
@@ -360,13 +374,14 @@ def main(argv: list[str] | None = None) -> int:
     real_stages = os.environ.get("VIHS_REAL_STAGES", "0") == "1"
     agent = PodAgent(
         pod_id=args.pod_id,
-        pod_addr=args.addr,
+        pod_addr=args.bind,
         orch_addr=args.orch,
         token=args.token,
         cap=args.cap,
         real_stages=real_stages,
         memoryd_addr=os.environ.get("VIHS_MEMORYD_ADDR", "127.0.0.1:8091"),
         mock_answers=_parse_mock_answers(os.environ.get("VIHS_MOCK_ANSWERS")),
+        advertise=args.advertise,
     )
 
     loop = asyncio.new_event_loop()

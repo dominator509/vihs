@@ -173,9 +173,23 @@ async fn handle_signal(
         return;
     };
 
+    // Pod-ward WS: pod.addr may be a bare host:port (public networking) or a
+    // RunPod proxy URL (https://{pod_id}-{port}.proxy.runpod.net when
+    // globalNetworking is disabled). Map the scheme: http -> ws, https -> wss.
+    let pod_addr_scheme = if pod_state.addr.starts_with("https://") {
+        "wss://"
+    } else if pod_state.addr.starts_with("http://") {
+        "ws://"
+    } else {
+        "ws://"
+    };
+    let pod_addr_host = pod_state
+        .addr
+        .strip_prefix("https://")
+        .or_else(|| pod_state.addr.strip_prefix("http://"))
+        .unwrap_or(&pod_state.addr);
     let ws_url = format!(
-        "ws://{}/internal/pods/{pod_key}/signal?connection_id={connection_id}",
-        pod_state.addr
+        "{pod_addr_scheme}{pod_addr_host}/internal/pods/{pod_key}/signal?connection_id={connection_id}",
     );
     let (pod_ws, _) = match tokio_tungstenite::connect_async(&ws_url).await {
         Ok(pair) => pair,

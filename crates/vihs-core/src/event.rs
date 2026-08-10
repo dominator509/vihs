@@ -58,6 +58,12 @@ pub struct Meta {
     /// Compaction epoch (D-4); monotonically increasing per session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epoch: Option<u64>,
+    /// Owner binding (SPEC-005 A1): set ONLY on the orchestrator's
+    /// session-create bootstrap note (`"session created"`), never on a
+    /// persona note. Lets the renderer skip operational notes when picking
+    /// the persona name (render.rs persona_name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
 }
 
 /// One event in the append-only log. Field names are the wire contract —

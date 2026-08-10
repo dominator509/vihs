@@ -420,4 +420,10 @@ class Conversation:
         with contextlib.suppress(Exception):  # memoryd may be down at revoke
             await self.append_buffer.flush()
         await self.append_buffer.stop()
+        # EP-009: close real stage subprocesses (persistent piper keeps the
+        # model loaded across clauses — must be torn down at revoke).
+        tts_close = getattr(self.stages.tts, "close", None)
+        if tts_close is not None:
+            with contextlib.suppress(Exception):
+                await tts_close()
         await self.pc.close()

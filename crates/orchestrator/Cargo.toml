@@ -16,7 +16,12 @@ chrono = { version = "0.4", features = ["serde"] }
 dashmap = "6"
 futures = "0.3"
 async-trait = "0.1"
-tokio-tungstenite = "0.24"
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"] }
+# Direct rustls dep so the orchestrator can install a process default
+# CryptoProvider (ring) before any TLS use — with both ring (reqwest) and
+# aws-lc-rs (tungstenite) compiled in, rustls cannot auto-select and
+# panics at first connect unless a provider is installed explicitly.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
