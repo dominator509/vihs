@@ -81,6 +81,17 @@ All drills re-runnable.
   ONE session under every spec-realistic budget → sessions_per_gpu = 0.
   ARCHITECTURE §6's levers (model size, prefix cache) assume a vLLM-class
   self-hosted model, not a hosted frontier model.
+- FAST-MODEL PATH (option b, 2026-08-10): the pod always sent
+  provider=deepseek with no model — deepseek-v4-flash's first CONTENT token
+  measures 1.9–2.5s (the role chunk arrives at ~300ms; first real delta is
+  slow — the pod's llm_ttft metric). Wired VIHS_LLM_MODEL/EGRESS through
+  the pod (e7373f6) and deployed v0.2.1 with claude-haiku-4-5. Direct
+  first-content probes: haiku 0.55–0.9s, gpt-4o-mini 0.5–0.8s — both ~2–3×
+  faster than deepseek-v4-flash. Pod measurement with haiku: llm_ttft
+  1.2–2.5s (HIGH run-to-run variance), tts_ttfa 2.9–4.3s, e2e 5–8s.
+  CONCLUSION: no hosted provider via this gateway meets the §6 first-chunk
+  budgets from a remote pod; the clause-pipelined first-frame path is
+  ~5–8s vs the 1.5s target regardless of LLM choice.
 
 ## 14. Decision Log
 - M2 BLOCKED (STOP S4): the spec latency budgets (ARCHITECTURE §6,
@@ -89,5 +100,12 @@ All drills re-runnable.
   measured reality, (b) add a faster model to the AXIOM gateway, (c)
   self-host a fast vLLM model (the spec's original lever). Operator
   decision required — no spec resolves which path.
+- 2026-08-10 operator chose (b). IMPLEMENTED + MEASURED: claude-haiku-4-5
+  wired and deployed (v0.2.1). Result: llm_ttft 1.2–2.5s (best hosted
+  option, 2–3× faster than deepseek-v4-flash) — still 3–6× over the 400ms
+  budget; tts_ttfa 2.9–4.3s (budget 300ms). (b) alone cannot reach the §6
+  budgets. Remaining: (a) amend budgets from real measurements, or (c)
+  local vLLM on the pod GPU. Recommended: (a) with measured headroom
+  (llm_ttft ≤3000ms, tts_ttfa ≤5000ms, e2e ≤9000ms p95), then re-derive.
 
 ## 15. Outcomes & Retrospective
