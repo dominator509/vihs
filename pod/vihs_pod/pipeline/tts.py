@@ -111,6 +111,9 @@ class PiperTTS:
         a short clause is ~88ms; the subprocess fallback pays ~3.5s of
         ONNX init on every spawn). Best-effort: failure falls back to the
         CLI path at stream time."""
+        import logging
+
+        log = logging.getLogger("vihs_pod.pipeline.tts")
         if self._voice is not None:
             return
         try:
@@ -119,8 +122,10 @@ class PiperTTS:
             self._voice = await asyncio.to_thread(
                 PiperVoice.load, self.voice, None, self.cuda
             )
-        except Exception:  # noqa: BLE001 — fall back to CLI path
+            log.info("tts warmup OK voice=%s cuda=%s", self.voice, self.cuda)
+        except Exception as exc:  # noqa: BLE001 — fall back to CLI path
             self._voice = None
+            log.warning("tts warmup FAILED voice=%s: %s", self.voice, exc)
 
     async def _synthesize_in_process(
         self, clause: str

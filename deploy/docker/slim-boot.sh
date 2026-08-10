@@ -34,32 +34,39 @@ fi
 
 echo "slim-boot: starting agent"
 # TTS fast path (EP-010 M2): copy the Piper voice model from the network
-# volume to LOCAL disk at boot. The volume read is ~20MB/s (~3.3s for the
+# volume to LOCAL disk at boot. The volume read is ~20MB/s (~3.5s for the
 # 63MB ONNX) and piper reloads the model on every process spawn (per
 # session) — that single reload blew the 300ms tts_ttfa budget every
 # turn. One local copy at boot amortizes it: subsequent spawns load from
 # NVMe + page cache (~150-300ms). Keep the volume copy untouched.
+# NOTE: run regardless of VIHS_TTS_VOICE being set (the staging driver
+# pins it to the volume path) — we OVERRIDE it to the local copy so the
+# agent's in-process warmup never reads the network volume.
 if [ -n "${VIHS_MODEL_DIR:-}" ] && [ -d "$VIHS_MODEL_DIR/tts" ]; then
     TTS_LOCAL=/opt/vihs-tts
     mkdir -p "$TTS_LOCAL"
-    if [ -z "${VIHS_TTS_VOICE:-}" ]; then
-        _voice="$(ls "$VIHS_MODEL_DIR"/tts/*.onnx 2>/dev/null | head -1 || true)"
-        if [ -n "$_voice" ]; then
-            _base="$(basename "$_voice")"
-            if [ ! -f "$TTS_LOCAL/$_base" ]; then
-                echo "slim-boot: copying TTS voice to local disk ($_base)"
-                cp "$_voice" "$TTS_LOCAL/$_base"
-            fi
-            export VIHS_TTS_VOICE="$TTS_LOCAL/$_base"
-            echo "slim-boot: VIHS_TTS_VOICE=$VIHS_TTS_VOICE"
-            # Boot-time warm: one dummy clause forces ONNX init so the page
-            # cache holds the model; the first real session then skips the
-            # cold read entirely.
-            if command -v piper >/dev/null 2>&1; then
-                echo "slim-boot: warming piper voice model"
-                echo "Warm." | piper --model "$VIHS_TTS_VOICE" --output-raw \
-                    >/dev/null 2>&1 || true
-            fi
+    _voice="$(ls "$VIHS_MODEL_DIR"/tts/*.onnx 2>/dev/null | head -1 || true)"
+    if [ -n "$_voice" ]; then
+        _base="$(basename "$_voice")"
+        if [ ! -f "$TTS_LOCAL/$_base" ]; then
+            echo "slim-boot: copying TTS voice to local disk ($_base)"
+            cp "$_voice" "$TTS_LOCAL/$_base"
+        fi
+        # Copy the JSON config too — PiperVoice.load REQUIRES it
+        # ({model}.json); without it the in-process warmup fails silently.
+        if [ -f "$VIHS_MODEL_DIR/tts/$_base.json" ] && [ ! -f "$TTS_LOCAL/$_base.json" ]; then
+            echo "slim-boot: copying TTS voice config to local disk"
+            cp "$VIHS_MODEL_DIR/tts/$_base.json" "$TTS_LOCAL/$_base.json"
+        fi
+        export VIHS_TTS_VOICE="$TTS_LOCAL/$_base"
+        echo "slim-boot: VIHS_TTS_VOICE=$VIHS_TTS_VOICE"
+        # Boot-time warm: one dummy clause forces ONNX init so the page
+        # cache holds the model; the first real session then skips the
+        # cold read entirely.
+        if command -v piper >/dev/null 2>&1; then
+            echo "slim-boot: warming piper voice model"
+            echo "Warm." | piper --model "$VIHS_TTS_VOICE" --output-raw \
+                >/dev/null 2>&1 || true
         fi
     fi
 fi
