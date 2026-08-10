@@ -46,8 +46,32 @@ if [ -n "${VIHS_LLAMA_GGUF:-}" ]; then
     if [ ! -f "$VIHS_LLAMA_GGUF" ]; then
         mkdir -p "$(dirname "$VIHS_LLAMA_GGUF")"
         echo "slim-boot: downloading GGUF from ${VIHS_LLAMA_GGUF_URL:-<unset>}"
-        curl -sL --max-time 3600 -o "${VIHS_LLAMA_GGUF}.part" "${VIHS_LLAMA_GGUF_URL}"
-        mv "${VIHS_LLAMA_GGUF}.part" "$VIHS_LLAMA_GGUF"
+        # Resumable: -C - continues a partial download; the operator mirror
+        # serves Range (206). Retry until curl exits 0 (EP-010 M2: a dropped
+        # connection must not kill the whole boot). Expected size optional.
+        _part="${VIHS_LLAMA_GGUF}.part"
+        _want="${VIHS_LLAMA_GGUF_SIZE:-0}"
+        _tries=0
+        while [ "$_tries" -lt 20 ]; do
+            _tries=$((_tries + 1))
+            if curl -sL -C - --max-time 900 -o "$_part" "${VIHS_LLAMA_GGUF_URL}"; then
+                _got=$(wc -c < "$_part" 2>/dev/null || echo 0)
+                if [ "$_want" -gt 0 ] && [ "$_got" != "$_want" ]; then
+                    echo "slim-boot: GGUF size mismatch got=$_got want=$_want (retry)"
+                    rm -f "$_part"
+                    continue
+                fi
+                echo "slim-boot: GGUF download complete ($_got bytes, try $_tries)"
+                mv "$_part" "$VIHS_LLAMA_GGUF"
+                break
+            fi
+            echo "slim-boot: GGUF download interrupted (try $_tries) — resuming"
+            sleep 3
+        done
+        if [ ! -f "$VIHS_LLAMA_GGUF" ]; then
+            echo "slim-boot: GGUF download failed after $_tries tries" >&2
+            exit 1
+        fi
     fi
     python -m llama_cpp.server \
         --model "$VIHS_LLAMA_GGUF" \

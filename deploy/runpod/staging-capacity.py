@@ -65,6 +65,7 @@ def main() -> int:
         "PROVIDER",
         "VIHS_LLAMA_GGUF",
         "VIHS_LLAMA_GGUF_URL",
+        "VIHS_LLAMA_GGUF_SIZE",
     ):
         if _k in os.environ:
             env[_k] = os.environ[_k]
@@ -143,6 +144,8 @@ def main() -> int:
         pod_env["VIHS_LLAMA_GGUF"] = env["VIHS_LLAMA_GGUF"]
     if env.get("VIHS_LLAMA_GGUF_URL"):
         pod_env["VIHS_LLAMA_GGUF_URL"] = env["VIHS_LLAMA_GGUF_URL"]
+    if env.get("VIHS_LLAMA_GGUF_SIZE"):
+        pod_env["VIHS_LLAMA_GGUF_SIZE"] = env["VIHS_LLAMA_GGUF_SIZE"]
 
     body: dict = {
         "name": "vihs-capacity-4090",
