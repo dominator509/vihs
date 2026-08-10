@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         gstreamer1.0-plugins-good \
         libgstreamer1.0-0 \
         gir1.2-gstreamer-1.0 \
+        libgomp1 \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
