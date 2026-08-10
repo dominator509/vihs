@@ -8,13 +8,13 @@ vihs_append_latency_ms_bucket{le="50"} 0
 vihs_append_latency_ms_bucket{le="100"} 0
 vihs_append_latency_ms_bucket{le="250"} 0
 vihs_append_latency_ms_bucket{le="500"} 0
-vihs_append_latency_ms_bucket{le="1000"} 1
-vihs_append_latency_ms_bucket{le="+Inf"} 69
-vihs_append_latency_ms_sum 92831.46192900001
-vihs_append_latency_ms_count 69
+vihs_append_latency_ms_bucket{le="1000"} 3
+vihs_append_latency_ms_bucket{le="+Inf"} 37
+vihs_append_latency_ms_sum 46797.979338
+vihs_append_latency_ms_count 37
 # HELP vihs_authz_denials_total Authorization denials.
 # TYPE vihs_authz_denials_total counter
-vihs_authz_denials_total 2
+vihs_authz_denials_total 0
 # HELP vihs_compactions_total Compaction events (memory blob rewritten).
 # TYPE vihs_compactions_total counter
 vihs_compactions_total 0

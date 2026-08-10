@@ -42,7 +42,10 @@ the new version (control plane first, then pods).
 ## Rollback steps
 See ROLLBACK.md. Binaries/images are versioned; event log is append-only and
 forward/backward tolerant one `v` either way, so rollback = redeploy previous
-tag; no data rollback exists or is needed.
+tag; no data rollback exists or is needed. Verified by drill on staging
+(EP-009 M5): `deploy/runpod/rollback-drill.py` rolls the pod image back one
+tag and asserts the live release via `--expect-release` — 97.8s rollback leg,
+SMOKE OK, 0 pods left billing.
 
 ## Post-deploy smoke tests
 `scripts/smoke-test.sh <base-url>`: create session → one scripted turn (staging

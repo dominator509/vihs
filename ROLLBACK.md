@@ -29,6 +29,19 @@ SEV1 — do not delete or rewrite (chain evidence).
 smoke-test.sh green; dashboards recovered to pre-release baselines for 30
 min; chain-fsck sample across sessions active during the incident.
 
+## Verified by drill (EP-009 M5, 2026-08-10)
+`deploy/runpod/rollback-drill.py` exercises the application-rollback leg on
+staging against REAL pods: deploy current image tag → smoke (release
+assertion) → deploy PREVIOUS image tag → smoke (release assertion) → restore
+current. The smoke's `--expect-release TAG` (smoke-test.sh
+`VIHS_EXPECT_RELEASE`) asserts the pod registered the expected tag
+(`versions.pod`, exposed in GET /admin/pods), proving WHICH image is live —
+not just that smoke passes. Result: rollback leg SMOKE OK in **97.8s** (budget
+600s), 0 pods left billing after each leg. Control-plane binary rollback
+(memoryd → orchestrator) is the same redeploy-previous-tag path and was not
+separately exercised in the drill because the v0.1.0↔v0.2.0 control-plane
+delta is the additive `versions` field the assertion reads.
+
 ## Communication
 Staging: note in ops channel. Production: incident entry + user-visible
 status if downtime exceeded 5 min.

@@ -44,6 +44,12 @@ def load_env(path: Path) -> dict[str, str]:
 
 def main() -> int:
     env = {**os.environ, **load_env(ROOT / ".env")}
+    # EP-009 M5 rollback drill: explicit process env pins the per-leg image
+    # + release. .env normally wins (canonical values); these two keys must
+    # respect the caller's override so the drill can roll between tags.
+    for _k in ("VIHS_RUNPOD_IMAGE", "VIHS_RELEASE"):
+        if _k in os.environ:
+            env[_k] = os.environ[_k]
     api_key = env.get("RUNPOD_API_KEY", "")
     image = env.get("VIHS_RUNPOD_IMAGE", "ghcr.io/dominator509/vihs/vihs-pod:latest")
     volume_id = env.get("VIHS_RUNPOD_VOLUME", "")

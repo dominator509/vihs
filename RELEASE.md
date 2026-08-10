@@ -23,6 +23,15 @@ block); invariant suite green; CHANGELOG updated.
 7 Production deploy. 8 Post-deploy smoke + verification (DEPLOYMENT.md).
 9 Monitor alerts for 24 h; hotfix or rollback on trigger (ROLLBACK.md).
 
+## Release tags & rollback (EP-009 M5)
+Releases are SemVer tags (`vX.Y.Z`); the pod image is pushed with the same
+tag (`ttl.sh/vihs-pod-slimlauncher:vX.Y.Z`). The pod registers its release as
+`versions.pod` (env `VIHS_RELEASE`, default derived from the image tag) and
+GET /admin/pods exposes it — so staging smoke can assert which release is
+live (`smoke-test.sh` with `VIHS_EXPECT_RELEASE`, or run_e2e.py
+`--expect-release`). Rollback = redeploy the previous image tag; validated by
+the EP-009 M5 drill (97.8s rollback leg, SMOKE OK).
+
 ## Release notes
 Human-readable summary from CHANGELOG; note any operator action required
 (new env vars from ENVIRONMENT.md diff, cap re-derivation on model change).

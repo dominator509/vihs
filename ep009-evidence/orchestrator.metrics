@@ -5,24 +5,24 @@ vihs_authz_denials_total 0
 # TYPE vihs_cold_start_secs histogram
 vihs_cold_start_secs_bucket{pod_id="staging-4090",le="1"} 0
 vihs_cold_start_secs_bucket{pod_id="staging-4090",le="2"} 0
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="5"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="10"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="20"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="30"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="60"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="120"} 1
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="+Inf"} 1
-vihs_cold_start_secs_sum{pod_id="staging-4090"} 2.149171393
-vihs_cold_start_secs_count{pod_id="staging-4090"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="5"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="10"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="20"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="30"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="60"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="120"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="+Inf"} 3
+vihs_cold_start_secs_sum{pod_id="staging-4090"} 6.783600733
+vihs_cold_start_secs_count{pod_id="staging-4090"} 3
 # HELP vihs_pod_sessions Current session slot fill per pod (registry.pod.fill).
 # TYPE vihs_pod_sessions gauge
-vihs_pod_sessions{pod_id="a9abef1d-5913-4b94-b15a-41222a5153d2"} 0
+vihs_pod_sessions{pod_id="3dd92108-4330-4543-9797-0e0e88ba3484"} 0
 vihs_pod_sessions{pod_id="staging-4090"} 1
 # HELP vihs_resume_total Session resume outcomes (result=ok|denied|error).
 # TYPE vihs_resume_total counter
 vihs_resume_total{result="denied"} 0
 vihs_resume_total{result="error"} 0
-vihs_resume_total{result="ok"} 2
+vihs_resume_total{result="ok"} 6
 # HELP vihs_scale_events_total Autoscaler actions executed (dir=up|down|replace).
 # TYPE vihs_scale_events_total counter
 vihs_scale_events_total{dir="down"} 0

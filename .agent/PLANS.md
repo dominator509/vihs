@@ -5,8 +5,9 @@ system change. A new agent with no prior conversation must be able to
 continue from the ExecPlan alone.
 
 ## Active plan
-Exactly one ExecPlan is ACTIVE at a time. Current: **EP-009 (ACTIVE)** —
-EP-008 is DONE. Update this line when a plan completes; the next plan in
+Exactly one ExecPlan is ACTIVE at a time. Current: **EP-010 (ACTIVE)** —
+EP-009 is DONE (all milestones M1–M5; staging smoke + rollback drill green).
+Update this line when a plan completes; the next plan in
 ROADMAP order becomes ACTIVE unless the user says otherwise.
 
 Status legend: PENDING → ACTIVE → DONE (or SKIPPED with recorded reason).
@@ -15,8 +16,8 @@ Status legend: PENDING → ACTIVE → DONE (or SKIPPED with recorded reason).
 | 000 | SKIPPED (greenfield) | | 006 | DONE |
 | 001 | DONE | | 007 | DONE |
 | 002 | DONE | | 008 | DONE |
-| 003 | DONE | | 009 | ACTIVE |
-| 004 | DONE | | 010 | PENDING |
+| 003 | DONE | | 009 | DONE |
+| 004 | DONE | | 010 | ACTIVE |
 | 005 | DONE | | | |
 
 ## Required sections (every ExecPlan, in order)

@@ -61,7 +61,7 @@ steps executed as written (doc bugs fixed in the same plan).
 
 ## 12. Progress
 Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
-- [x] M4 - [ ] M5
+- [x] M4 - [x] M5
 
 ## 13. Surprises & Discoveries
 - M1: `nvidia/cuda:12.4.1-base-ubuntu24.04` does not exist on Docker Hub; the
@@ -88,6 +88,13 @@ Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
   the repo exists.
 - M3: PyYAML parses the Actions `on:` key as boolean True (YAML 1.1) — the
   trigger structure is intact under GitHub's own parser (push + workflow_dispatch).
+- M5: staging-deploy.py merges env as `{**os.environ, **load_env(.env)}` —
+  `.env` WINS, so the drill's per-leg `VIHS_RUNPOD_IMAGE`/`VIHS_RELEASE`
+  overrides were silently ignored and every leg would deploy the mutable
+  `:24h` tag. Fixed: explicit process-env wins for those two keys.
+- M5: orchestrator restarted WITHOUT `WARM_POOL_FLOOR` in its env (capture
+  pattern missed it) → default floor 1 fired the mock provider's floor
+  bootstrap. Restarted with floor=0 explicitly; registry clean.
 ## 14. Decision Log
 - M1: base image `nvidia/cuda:12.9.2-base-ubuntu24.04` (12.4.1 lacks a
   ubuntu24.04 tag; 12.9.2 is the current 12.x line with it). Python 3.12 ships
@@ -180,3 +187,27 @@ remote smoke GREEN on a live RunPod 4090 pod:
 - Env notes: `.env` carries VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:24h,
   VIHS_ORCH_ADDR=66.94.123.250:8080 (public for RunPod pods; local chaos
   drills force 0.0.0.0 hermetic binds).
+
+## 17. M5 completion (EP-009, verified 2026-08-10)
+M5 ROLLBACK DRILL is DONE — `deploy/runpod/rollback-drill.py` exit 0, all
+legs on REAL RunPod pods with release assertions:
+- Tags created: `v0.1.0` (M4 state, ce9d335 — agent HARDCODES versions.pod
+  "0.1.0") and `v0.2.0` (M5 state, bb8c1bc — agent reads VIHS_RELEASE).
+  Images built from the tags and pushed: `ttl.sh/vihs-pod-slimlauncher:v0.1.0`
+  and `:v0.2.0` (docker build from clean tag worktrees; digests differ).
+- LEG 1 current v0.2.0: pod reports release v0.2.0, SMOKE_OK, cold_start
+  54.8s, pod terminated.
+- LEG 2 ROLLBACK to v0.1.0: pod reports release 0.1.0, SMOKE_OK —
+  **rollback_s=97.8s** (budget 600s = EP-009 §5 validation ≤10 min), pod
+  terminated.
+- LEG 3 RESTORE v0.2.0: pod reports release v0.2.0, SMOKE_OK, pod terminated.
+- Verification: 0 pods billing after the drill; volume 0z0kdx56tb intact.
+- Release observability shipped: pod `versions.pod` from VIHS_RELEASE; GET
+  /admin/pods exposes `versions`; run_e2e.py `--expect-release TAG`;
+  smoke-test.sh `VIHS_EXPECT_RELEASE`; ENVIRONMENT.md row; RELEASE.md /
+  DEPLOYMENT.md / ROLLBACK.md drill evidence; CHANGELOG entry.
+- Real bugs found en route (both fixed, both logged in §13): deploy env merge
+  order (.env would beat the drill override), orchestrator floor default on
+  restart.
+- EP-009 all milestones DONE. Next: EP-010 (P1–P8 production-readiness
+  drills, launch ADR).
