@@ -185,11 +185,15 @@ class PodAgent:
         return {"Authorization": f"Bearer {self.token}"}
 
     async def register(self) -> None:
+        release = os.environ.get("VIHS_RELEASE", "0.1.0")
         body = {
             "pod_id": self.pod_id,
             "addr": self.advertise,
             "cap": self.cap,
-            "versions": {"pod": "0.1.0", "stages": "mock" if not self.real_stages else "real"},
+            "versions": {
+                "pod": release,
+                "stages": "mock" if not self.real_stages else "real",
+            },
         }
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.post(

@@ -40,6 +40,7 @@ MEMORYD_ADDR = "127.0.0.1:8091"
 POD_ADDR = "127.0.0.1:8093"
 REMOTE = False  # --base-url sets this; skips local service/pod boot
 METRICS_OUT: str | None = None  # set by --metrics-out DIR (EP-008 M4)
+EXPECT_RELEASE: str | None = None  # set by --expect-release TAG (EP-009 M5)
 USER_TOKEN = ""  # minted at startup via POST /admin/tokens (EP-006 M1)
 POD_TOKEN = ""  # loaded from .env VIHS_POD_TOKEN (32-byte b64url, seeded at startup)
 WAIT = 20.0
@@ -464,6 +465,13 @@ async def _remote_resume() -> None:
     print(f"== remote resume against {ORCH_ADDR} ==")
     pod = wait_ready_pod()
     print(f"  ready pod {pod.get('id')} state={pod.get('state')} fill={pod.get('fill')}")
+    if EXPECT_RELEASE:
+        live = (pod.get("versions") or {}).get("pod")
+        if live != EXPECT_RELEASE:
+            raise RuntimeError(
+                f"pod release mismatch: expected {EXPECT_RELEASE}, live {live}"
+            )
+        print(f"  release check: pod reports {live} (matches expected)")
 
     status, body = api("/v1/sessions", method="POST", body={"persona_id": "e2e"})
     if status != 201:
@@ -775,6 +783,16 @@ def main(argv: list[str] | None = None) -> int:
                 print("--metrics-out requires a directory", file=sys.stderr)
                 return 2
             metrics_out = args[i]
+        elif arg == "--expect-release":
+            # EP-009 M5: assert the ready pod registered the given release
+            # tag (rollback drill: proves WHICH image is live, not just that
+            # smoke passes).
+            i += 1
+            if i >= len(args):
+                print("--expect-release requires a tag", file=sys.stderr)
+                return 2
+            global EXPECT_RELEASE
+            EXPECT_RELEASE = args[i]
         else:
             targets.append(arg)
         i += 1

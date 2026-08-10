@@ -50,6 +50,7 @@ async fn pods(State(st): State<Arc<AppState>>, headers: HeaderMap) -> Result<Res
                 "fill": pod.fill,
                 "cap": pod.cap,
                 "last_ping_age_s": age,
+                "versions": pod.versions,
             })
         })
         .collect();

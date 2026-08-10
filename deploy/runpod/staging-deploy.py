@@ -56,6 +56,9 @@ def main() -> int:
     llm_token = env.get("VIHS_LLM_TOKEN", "")
     dc = env.get("VIHS_RUNPOD_REGION", "CA-MTL-4")
     gpu = env.get("VIHS_RUNPOD_GPU", "NVIDIA GeForce RTX 4090")
+    # EP-009 M5: release tag the pod registers (VIHS_RELEASE → versions.pod).
+    # Rollback drill asserts it via the smoke's --expect-release flag.
+    release = env.get("VIHS_RELEASE", os.path.basename(image.split(":")[-1]) if ":" in image else "0.1.0")
 
     if not api_key or not orch or not pod_token:
         print("deploy: missing RUNPOD_API_KEY / VIHS_ORCH_ADDR / VIHS_POD_TOKEN", file=sys.stderr)
@@ -100,6 +103,7 @@ def main() -> int:
         # addr reachable from the RunPod pod, not loopback.
         "VIHS_MEMORYD_ADDR": env.get("VIHS_MEMORYD_PUBLIC_ADDR", ""),
         "VIHS_POD_TOKEN": pod_token,
+        "VIHS_RELEASE": release,
         "VIHS_STT_DEVICE": "cuda",
         "VIHS_STT_COMPUTE": "float16",
         "VIHS_TTS_VOICE": f"{VOLUME_DIR}/tts/en_US-lessac-medium.onnx",
@@ -217,6 +221,8 @@ def main() -> int:
             "--remote-smoke",
             "--base-url",
             f"http://{orch_local}",
+            "--expect-release",
+            release,
             "--metrics-out",
             smoke_out,
         ]

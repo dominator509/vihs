@@ -8,8 +8,15 @@ if [ -f tests/e2e/run_e2e.py ] && [ -d pod/.venv ]; then
   OUT="$(mktemp -d)"
   trap 'rm -rf "$OUT"' EXIT
   if [ -n "${1:-}" ]; then
-    pod/.venv/bin/python tests/e2e/run_e2e.py --remote-smoke --base-url "$1" \
-      --metrics-out "$OUT"
+    # EP-009 M5: VIHS_EXPECT_RELEASE asserts the live pod registered the
+    # given tag (rollback drill — proves WHICH release is running).
+    if [ -n "${VIHS_EXPECT_RELEASE:-}" ]; then
+      pod/.venv/bin/python tests/e2e/run_e2e.py --remote-smoke --base-url "$1" \
+        --expect-release "$VIHS_EXPECT_RELEASE" --metrics-out "$OUT"
+    else
+      pod/.venv/bin/python tests/e2e/run_e2e.py --remote-smoke --base-url "$1" \
+        --metrics-out "$OUT"
+    fi
   else
     pod/.venv/bin/python tests/e2e/run_e2e.py --smoke \
       --metrics-out "$OUT"
