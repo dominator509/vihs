@@ -52,8 +52,16 @@ def main() -> int:
     keep_warm = "--keep-warm" in sys.argv
     env = {**os.environ, **load_env(ROOT / ".env")}
     # Process env wins for the drill-pinned keys (same contract as
-    # staging-deploy.py EP-009 M5).
-    for _k in ("VIHS_RUNPOD_IMAGE", "VIHS_RELEASE"):
+    # staging-deploy.py EP-009 M5). LLM keys included so a capacity run can
+    # pin provider/model/egress (EP-010 M2 fast-model path) without editing
+    # .env.
+    for _k in (
+        "VIHS_RUNPOD_IMAGE",
+        "VIHS_RELEASE",
+        "VIHS_LLM_PROVIDER",
+        "VIHS_LLM_MODEL",
+        "VIHS_LLM_EGRESS",
+    ):
         if _k in os.environ:
             env[_k] = os.environ[_k]
 
