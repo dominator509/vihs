@@ -13,8 +13,14 @@ if [ -f .env ]; then
   fi
 fi
 # Non-goal grep gate (PROJECT_BRIEF): forbidden feature surface absent.
-if grep -RIn --include='*.rs' --include='*.py' -e 'billing' -e 'group_call' \
-     crates pod 2>/dev/null | grep -v -e test -e '#' >/dev/null; then
+# Scan ONLY real source (crates/*/src, pod/vihs_pod) — NOT target/ or
+# pod/.venv (vendored packages contain 'billing'/'group_call' substrings).
+# Word-boundary match so doc prose ("billing stops" in a comment) and
+# substrings ('jfbillingsley') cannot trip it; comment lines are ignored.
+if grep -RInw --include='*.rs' --include='*.py' -e 'billing' -e 'group_call' \
+     crates/*/src pod/vihs_pod 2>/dev/null \
+  | grep -v -e '^\s*[A-Za-z0-9_./-]*:[0-9]*:\s*\(//\|#\|///\|//!\)' \
+  | grep -v -e 'test' >/dev/null; then
   echo "PROD-READY FAIL: non-goal surface detected" >&2; exit 1
 fi
 echo "PROD-READY OK (automated subset; drills per PRODUCTION_READINESS.md still required)"
