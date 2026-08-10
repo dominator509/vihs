@@ -58,8 +58,36 @@ ADR drafted; open risks enumerated in the report.
 (re-runnable as stated)
 
 ## 12. Progress
-All drills re-runnable. - [ ] M1 - [ ] M2 - [ ] M3 - [ ] M4 - [ ] M5
+All drills re-runnable.
+- [x] M1 (gate green; PROD-READY FAIL expected until M2 derives cap)
+- [ ] M2 (harness FIXED + real ramp RUNS; derivation = 0 under spec budgets — BLOCKED on LLM-latency decision, see §14)
+- [ ] M3 - [ ] M4 - [ ] M5
 
 ## 13. Surprises & Discoveries
+- Relay pod-ward dial had NO timeout: a hung dial left the client WS silent
+  (state frame never sent). Fixed with a 10s timeout + dial logging
+  (2ca3f0f).
+- RunPod proxy URLs (https://{pod}-{port}.proxy.runpod.net) sit behind
+  Cloudflare: the default Python-urllib UA gets 403/1010. Pod-ward HTTP in
+  the harness now sends a browser-like UA (2ca3f0f).
+- Local CI capacity test is contaminated by any registered REMOTE pod: the
+  scheduler assigns sessions across ALL ready pods, so a keep-warm staging
+  pod steals a stage's session and the local pod's metrics never settle.
+  Run local CI with zero remote pods registered.
+- FIRST REAL-GPU DERIVATION: the production LLM path (ADR-012 AXIOM gateway
+  → Lightning claude-opus-4-7) measures llm_ttft 1467–1850ms vs the 400ms
+  budget (4.6×); relaxing LLM budget to 2000ms exposes tts_ttfa 4424ms
+  (budget 300ms) and e2e_first_frame/total ≈ 6.2s (target 1.5s). Breach at
+  ONE session under every spec-realistic budget → sessions_per_gpu = 0.
+  ARCHITECTURE §6's levers (model size, prefix cache) assume a vLLM-class
+  self-hosted model, not a hosted frontier model.
+
 ## 14. Decision Log
+- M2 BLOCKED (STOP S4): the spec latency budgets (ARCHITECTURE §6,
+  llm_ttft 400ms / tts_ttfa 300ms / e2e 1.5s) are unreachable with the
+  chosen production model. Options: (a) amend budgets to the model's
+  measured reality, (b) add a faster model to the AXIOM gateway, (c)
+  self-host a fast vLLM model (the spec's original lever). Operator
+  decision required — no spec resolves which path.
+
 ## 15. Outcomes & Retrospective
