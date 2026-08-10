@@ -130,6 +130,11 @@ def restart_orchestrator() -> tuple[str, subprocess.Popen]:
                 break
             time.sleep(0.2)
     env = {**os.environ, **load_env(ROOT / ".env")}
+    # Hermetic bind: .env may carry a staging/public VIHS_ORCH_ADDR (EP-009
+    # RunPod deploys) that would bind only the public IP — the drill's
+    # wait_readyz(8080) polls loopback and would time out. Force 0.0.0.0 so
+    # both 127.0.0.1 and the public addr answer.
+    env["VIHS_ORCH_ADDR"] = "0.0.0.0:8080"
     proc = subprocess.Popen(
         [str(ROOT / "target" / "debug" / "orchestrator")],
         cwd=ROOT,
@@ -160,6 +165,9 @@ def restart_memoryd() -> tuple[str, subprocess.Popen]:
                 break
             time.sleep(0.2)
     env = {**os.environ, **load_env(ROOT / ".env")}
+    # Hermetic bind (see restart_orchestrator): 0.0.0.0 keeps loopback
+    # checks AND the staging public addr working after the drill.
+    env["VIHS_MEMORYD_ADDR"] = "0.0.0.0:8091"
     proc = subprocess.Popen(
         [str(ROOT / "target" / "debug" / "memoryd")],
         cwd=ROOT,

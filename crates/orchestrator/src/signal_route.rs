@@ -178,8 +178,6 @@ async fn handle_signal(
     // globalNetworking is disabled). Map the scheme: http -> ws, https -> wss.
     let pod_addr_scheme = if pod_state.addr.starts_with("https://") {
         "wss://"
-    } else if pod_state.addr.starts_with("http://") {
-        "ws://"
     } else {
         "ws://"
     };

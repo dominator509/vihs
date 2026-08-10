@@ -13,9 +13,8 @@ const INTERRUPTED_MARK: &str = "⟪interrupted⟫";
 /// Persona name: from the first `system` event's text (SPEC-002 memory.md
 /// shape) — EXCLUDING summary events (rolling summary text, not the
 /// persona) and EXCLUDING owner-bound bootstrap notes (SPEC-005 A1: the
-/// orchestrator's session-create appends a system note carrying
-/// `meta.owner`; it is an operational marker, not a persona). Falls back
-/// to "Assistant".
+/// session-create path appends a system note carrying `meta.owner`; it is
+/// an operational marker, not a persona). Falls back to "Assistant".
 fn persona_name(events: &[Event]) -> &str {
     events
         .iter()

@@ -71,6 +71,8 @@ def memoryd_pid() -> int:
             or cmd.startswith("/root/vihs/target/release/memoryd")
             or cmd.startswith("./target/debug/memoryd")
             or cmd.startswith("./target/release/memoryd")
+            or cmd.startswith("target/debug/memoryd")
+            or cmd.startswith("target/release/memoryd")
         ):
             return int(pid)
     raise RuntimeError("memoryd binary process not found (pgrep output:\n" + out + ")")
