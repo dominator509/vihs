@@ -719,7 +719,14 @@ def _dump_metrics(out_dir: str) -> None:
                 body = json.loads(resp.read())
             for p in body.get("pods", []):
                 if p.get("state") == "ready":
-                    pod_metrics_url = f"http://{p['addr']}/metrics"
+                    # The registered addr is a full URL (proxy form:
+                    # https://{pod}-8093.proxy.runpod.net) or host:port —
+                    # use it verbatim when it already carries a scheme.
+                    addr = p["addr"]
+                    if "://" in addr:
+                        pod_metrics_url = f"{addr}/metrics"
+                    else:
+                        pod_metrics_url = f"http://{addr}/metrics"
                     break
         except Exception as exc:  # noqa: BLE001
             print(f"  admin/pods for metrics: {exc}")

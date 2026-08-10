@@ -45,12 +45,12 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests" / "e2e"))
 
 from run_e2e import (  # noqa: E402
-    POD_ADDR,
     api,
     bootstrap_tokens,
     ensure_services,
     stop_processes,
 )
+import run_e2e as _re  # module handle: capacity mutates its globals in remote mode
 
 # ARCHITECTURE §6 first-chunk budgets (ms), env-overridable.
 DEFAULT_BUDGETS_MS = {
@@ -74,7 +74,9 @@ def budget_ms(stage: str) -> int:
 
 def read_pod_health() -> dict:
     """GET the pod's local /health (aggregated per-stage metrics)."""
-    with urllib.request.urlopen(f"http://{POD_ADDR}/health", timeout=5) as resp:
+    addr = _re.POD_ADDR
+    url = f"{addr}/health" if "://" in addr else f"http://{addr}/health"
+    with urllib.request.urlopen(url, timeout=5) as resp:
         return json.loads(resp.read())
 
 
@@ -228,7 +230,46 @@ def start_pod(sim_breach: bool, cap: int) -> subprocess.Popen:
     return pod_proc
 
 
+def acquire_remote_pod() -> None:
+    """EP-010 M2: point POD_ADDR at the pre-registered REMOTE pod (staging).
+    The orchestrator's admin snapshot carries its registered addr (proxy URL
+    or host:port); capacity then ramps against that real pod."""
+    pod = _re.wait_ready_pod(timeout=120.0)
+    _re.POD_ADDR = pod["addr"]
+    print(f"  remote pod {pod.get('id')} addr={pod.get('addr')}")
+
+
+async def wait_ready_pod_remote(timeout: float = 120.0) -> None:
+    """Async wrapper: block until the orchestrator has a Ready pod. Uses
+    run_e2e's sync wait_ready_pod in a thread so the asyncio loop stays
+    responsive for the subsequent WebRTC peers."""
+    await asyncio.to_thread(_re.wait_ready_pod, timeout)
+
+
 async def main() -> int:
+    # EP-010 M2: --base-url = remote staging capacity run against a
+    # pre-registered real pod (same contract as run_e2e --base-url).
+    remote_base: str | None = None
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--base-url":
+            i += 1
+            if i >= len(argv):
+                print("--base-url requires a URL", file=sys.stderr)
+                return 2
+            remote_base = argv[i].rstrip("/")
+        else:
+            print(f"unknown arg: {argv[i]}", file=sys.stderr)
+            return 2
+        i += 1
+    if remote_base:
+        if "://" in remote_base:
+            remote_base = remote_base.split("://", 1)[1]
+        _re.ORCH_ADDR = remote_base
+        _re.REMOTE = True
+        print(f"== loadtest: REMOTE capacity derivation against {remote_base} ==")
+
     sim_breach = os.environ.get("VIHS_CAPACITY_SIM_BREACH", "0") == "1"
     cap = int(os.environ.get("VIHS_CAPACITY_CAP", "3"))
     ramp = list(range(1, cap + 1))
@@ -246,9 +287,14 @@ async def main() -> int:
         if sim_breach:
             print("  SIM_BREACH: forcing lipsync_ff above budget to prove stop logic")
 
-        pod_proc = start_pod(sim_breach, cap)
-        await wait_pod_ready()
-        print("  pod ready (registered, fill=0)")
+        if remote_base:
+            # Staging pod is ALREADY registered — never spawn a local one.
+            await wait_ready_pod_remote()
+            acquire_remote_pod()
+        else:
+            pod_proc = start_pod(sim_breach, cap)
+            await wait_pod_ready()
+            print("  pod ready (registered, fill=0)")
 
         stage_rows: list[dict] = []
         for n in ramp:
@@ -326,7 +372,9 @@ async def main() -> int:
         for sid in session_ids:
             with contextlib.suppress(Exception):
                 api(f"/v1/sessions/{sid}", method="DELETE")
-        if pod_proc is not None and pod_proc.poll() is None:
+        if not remote_base and pod_proc is not None and pod_proc.poll() is None:
+            # Local harness pod only — a REMOTE pod is owned by the staging
+            # deploy driver, which terminates it (never held-open billing).
             with contextlib.suppress(Exception):
                 pod_proc.send_signal(15)  # SIGTERM
         # Restore env overrides set by start_pod.
