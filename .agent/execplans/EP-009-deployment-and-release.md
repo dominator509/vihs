@@ -61,7 +61,7 @@ steps executed as written (doc bugs fixed in the same plan).
 
 ## 12. Progress
 Deploys are re-runnable; staging sessions cleaned. - [x] M1 - [x] M2 - [x] M3
-- [ ] M4 - [ ] M5
+- [x] M4 - [ ] M5
 
 ## 13. Surprises & Discoveries
 - M1: `nvidia/cuda:12.4.1-base-ubuntu24.04` does not exist on Docker Hub; the
@@ -148,3 +148,35 @@ M4 remaining (needs operator decisions, see Surprises):
    orchestrator's pod-ward signal WS cannot connect. Deploy script needs the
    create → read runtime IP → set env → restart cycle.
 STOP S1 holds on model weights until decided.
+
+## 16. M4 completion (EP-009, verified 2026-08-10)
+M4 STAGING is DONE — `verify.sh` VERIFY OK (all 12 sections) and the real
+remote smoke GREEN on a live RunPod 4090 pod:
+- `deploy/runpod/staging-deploy.py` creates ONE pod (ttl.sh slim launcher,
+  ctranslate2 whisper + piper voices + cublas staged on volume `0z0kdx56tb`),
+  waits Ready, runs the remote smoke through the real relay, and ALWAYS
+  terminates the pod in `finally` (operator hard rule: no held-open billing).
+- Smoke: cold_start 73.9s; `client WebRTC connected through relay (remote
+  pod)`; `turn 1 committed (user + assistant in transcript)`; `remote resume:
+  both turns present in order; transcript durable`; `e2e_remote_resume OK`;
+  deploy exit 0; pod terminated; 0 pods after.
+- Two root causes found and fixed along the way:
+  1. Renderer `persona_name()` picked the session-create bootstrap note
+     (`"session created"`, role=system, meta.owner) as the speaker label —
+     every assistant utterance rendered as `**session created**` so the
+     smoke's `**Assistant**` needle could never match. The pipeline was
+     committing correctly all along (pod log-forwarding proved events POST
+     200). Fix: `Event::Meta.owner` + skip owner-bound notes in
+     `persona_name()` (goldens unchanged — persona notes carry no owner).
+  2. rustls panicked at first TLS use ("Could not automatically determine
+     CryptoProvider"): reqwest pulls ring, tokio-tungstenite pulls
+     aws-lc-rs. Fix: direct rustls dep (ring) + `install_default()` at
+     orchestrator start.
+- Also shipped: piper persistent-process fix (per-clause model reload
+  killed; local 21.9s→4.7s), orchestrator wss relay scheme mapping,
+  slim launcher image + wheel mirror + log-forwarding (VIHS_LOG_POST),
+  probe ladder (turn/c2/c3), check_status/check_volumes scripts.
+- Remaining M5 (rollback drill) per EP-009 §5; P1–P8 drills in EP-010.
+- Env notes: `.env` carries VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:24h,
+  VIHS_ORCH_ADDR=66.94.123.250:8080 (public for RunPod pods; local chaos
+  drills force 0.0.0.0 hermetic binds).
