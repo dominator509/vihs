@@ -188,3 +188,91 @@ async def test_piper_tts_fake_process() -> None:
     assert chunks, "must emit at least one AudioChunk"
     assert all(isinstance(c, AudioChunk) for c in chunks)
     assert all(c.dur_ms > 0 for c in chunks)
+
+
+# ─── EP-010 M2: TTS cadence layer + envelope unwrap (no model weights) ───
+
+
+async def test_unwrap_assistant_envelope_strips_json() -> None:
+    """An RP model that wraps its reply in {"t": "assistant_output", ...}
+    must never feed JSON syntax to TTS."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        for piece in [
+            '{"t": "assistant_',
+            'output", "text": "Hel',
+            "lo! How can I assist",
+            ' you today?"}',
+        ]:
+            yield piece
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "Hello! How can I assist you today?"
+
+
+async def test_unwrap_assistant_envelope_passthrough_prose() -> None:
+    """Plain prose passes through byte-for-byte."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        yield "Hello! "
+        yield "This is normal prose."
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "Hello! This is normal prose."
+
+
+async def test_unwrap_assistant_envelope_non_envelope_json() -> None:
+    """A stream that STARTS with { but is not the envelope is untouched."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        yield '{"foo": "bar"}'
+        yield " tail"
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == '{"foo": "bar"} tail'
+
+
+def test_tts_split_sentences_abbrev_aware() -> None:
+    """Cadence layer splits on sentence boundaries, never inside
+    abbreviations, decimals, or ellipses."""
+    from vihs_pod.pipeline.tts import _split_sentences
+
+    assert _split_sentences("Dr. Smith is here. Call Mr. Jones.") == [
+        "Dr. Smith is here.",
+        "Call Mr. Jones.",
+    ]
+    assert _split_sentences("Wait... really? 3.14 is pi.") == [
+        "Wait... really?",
+        "3.14 is pi.",
+    ]
+    assert _split_sentences("") == []
+
+
+def test_tts_pause_and_prosody() -> None:
+    """Pause length and SynthesisConfig vary by punctuation/emotion."""
+    from vihs_pod.pipeline.tts import _pause_ms_after, _prosody_for
+
+    assert _pause_ms_after("Really?") == 380
+    assert _pause_ms_after("Wow!") == 340
+    assert _pause_ms_after("Fine.") == 320
+    assert _pause_ms_after("Hmm...") == 600
+
+    from piper.config import SynthesisConfig
+
+    cfg = _prosody_for("Wow!", 1.0, 0.667, 0.8)
+    assert isinstance(cfg, SynthesisConfig)
+    assert cfg.length_scale < 1.0  # exclamation → faster
+    assert cfg.noise_scale > 0.667  # exclamation → livelier
+
+    cfg2 = _prosody_for("I wonder why...", 1.0, 0.667, 0.8)
+    assert cfg2.length_scale > 1.0  # ellipsis → slower
+    assert cfg2.volume < 1.0  # ellipsis → quieter
+
+    cfg3 = _prosody_for("I LOVE this!", 1.0, 0.667, 0.8)
+    assert cfg3.volume > 1.0  # caps → emphasis
+
+    cfg4 = _prosody_for("The tea is ready.", 1.0, 0.667, 0.8)
+    assert cfg4.length_scale == 1.0 and cfg4.volume == 1.0

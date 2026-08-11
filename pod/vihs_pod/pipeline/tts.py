@@ -20,11 +20,123 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
+from vihs_pod.pipeline.clause import ABBREV
 from vihs_pod.pipeline.protocols import AudioChunk
 
-_shared: "PiperTTS | None" = None
+if TYPE_CHECKING:
+    from piper.voice import PiperVoice as _PiperVoice
+
+_shared: PiperTTS | None = None
+
+
+def _split_sentences(clause: str) -> list[str]:
+    """Abbreviation-aware sentence split (mirrors the clause chunker's
+    boundary rules: no split on Mr./Dr./etc., decimals, or ellipsis dots).
+
+    Used BOTH to drive per-sentence synthesis/prosody AND to allocate
+    chars_covered. Piper's espeak phonemizer keeps abbreviations as one
+    sentence; a naive split would synthesize "Mr." alone and sound wrong.
+    """
+    if not clause:
+        return []
+    out: list[str] = []
+    start = 0
+    i = 0
+    n = len(clause)
+    while i < n:
+        ch = clause[i]
+        nxt = clause[i + 1 : i + 2]
+        if ch in ".?!" and (nxt == "" or nxt == " "):
+            tail = clause[max(0, i - 4) : i + 1].lower()
+            if any(tail.endswith(a) for a in ABBREV):
+                i += 1
+                continue
+            if ch == "." and clause[i - 1 : i].isdigit() and nxt.isdigit():
+                i += 1
+                continue
+            if ch == "." and (clause[i - 1 : i] == "." or nxt == "."):
+                i += 1
+                continue
+            out.append(clause[start : i + 1])
+            start = i + 1
+            # The space after the terminal is a gap, not speech — strip
+            # it so sentence text (and its char budget) is exact.
+            while start < n and clause[start] in " \t\n":
+                start += 1
+        i += 1
+    if start < n:
+        out.append(clause[start:])
+    return [s for s in out if s.strip()]
+
+
+def _pause_ms_after(sentence: str) -> int:
+    """Natural inter-sentence pause (ms) driven by final punctuation.
+
+    Human speech breathes between thoughts: a period gets a beat, a
+    question lingers a little longer, an ellipsis means trailing off,
+    a comma is a short lift. This is the cadence layer (EP-010 M2):
+    without it piper chains every sentence at machine tempo.
+    """
+    s = sentence.rstrip()
+    if s.endswith("...") or s.endswith("…"):
+        return 600
+    if s.endswith("?"):
+        return 380
+    if s.endswith("!"):
+        return 340
+    if s.endswith("."):
+        return 320
+    if s.endswith(","):
+        return 180
+    return 250
+
+
+def _prosody_for(
+    sentence: str,
+    base_length: float,
+    base_noise: float,
+    base_noise_w: float,
+):
+    """Per-sentence SynthesisConfig from emotion cues in the text.
+
+    Exclamation → brighter, a touch faster (energy). Question → slightly
+    slower (curiosity). Ellipsis → slower and quieter (trailing off).
+    ALL-CAPS words → deliberate emphasis (slower + louder). These are
+    small, deterministic deltas — the goal is natural variation, not
+    cartoon acting.
+    """
+    from piper.config import SynthesisConfig  # noqa: PLC0415
+
+    s = sentence.strip()
+    length = base_length
+    noise = base_noise
+    volume = 1.0
+
+    excl = s.count("!")
+    if excl:
+        length *= max(0.90, 1.0 - 0.035 * excl)
+        noise = min(0.85, noise + 0.04 * excl)
+    if s.rstrip().endswith("?"):
+        length *= 1.03
+    if "..." in s or s.endswith("…"):
+        length *= 1.08
+        noise = max(0.55, noise - 0.05)
+        volume *= 0.94
+    words = re.findall(r"[A-Z]{2,}", s)
+    if words:
+        length *= 1.02
+        volume = min(1.25, volume + 0.07 * len(words))
+
+    return SynthesisConfig(
+        length_scale=round(length, 3),
+        noise_scale=round(noise, 3),
+        noise_w_scale=base_noise_w,
+        volume=round(volume, 3),
+    )
 
 
 def get_shared_piper(
@@ -33,7 +145,7 @@ def get_shared_piper(
     sample_rate: int = 16000,
     chunk_ms: int = 100,
     cuda: bool = False,
-) -> "PiperTTS":
+) -> PiperTTS:
     """Pod-level singleton: ONE PiperTTS for the pod lifetime.
 
     EP-010 M2: piper pays ~3.5s of ONNX init per process spawn. A
@@ -81,7 +193,7 @@ class PiperTTS:
         self.chunk_ms = chunk_ms
         self.cuda = cuda
         self.pod_shared = False  # set True by get_shared_piper
-        self._voice: object | None = None  # piper.voice.PiperVoice (lazy)
+        self._voice: _PiperVoice | None = None  # piper.voice.PiperVoice (lazy)
         self._proc: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
 
@@ -119,53 +231,154 @@ class PiperTTS:
         try:
             from piper.voice import PiperVoice  # noqa: PLC0415
 
-            self._voice = await asyncio.to_thread(
-                PiperVoice.load, self.voice, None, self.cuda
-            )
+            self._voice = await asyncio.to_thread(PiperVoice.load, self.voice, None, self.cuda)
             log.info("tts warmup OK voice=%s cuda=%s", self.voice, self.cuda)
         except Exception as exc:  # noqa: BLE001 — fall back to CLI path
             self._voice = None
             log.warning("tts warmup FAILED voice=%s: %s", self.voice, exc)
 
-    async def _synthesize_in_process(
-        self, clause: str
-    ) -> AsyncIterator[AudioChunk]:
+    async def _synthesize_in_process(self, clause: str) -> AsyncIterator[AudioChunk]:
         """Synthesize one clause in-process; chunk into AudioChunks by
         REAL audio duration (no estimated-duration drift, no pipe
-        leftovers)."""
+        leftovers).
+
+        EP-010 M2: each SENTENCE is synthesized with its own
+        `SynthesisConfig` (speed/energy/volume from punctuation and
+        emotion cues — the cadence layer: questions linger, exclamations
+        brighten, ellipses trail off) and a natural pause is inserted
+        after it. We yield audio AS IT IS PRODUCED (not after the whole
+        clause): the FIRST sentence's audio is ready in ~100ms even for a
+        long multi-sentence clause — that is what keeps tts_ttfa near the
+        first-sentence cost instead of the whole-clause cost. (A prior
+        version did `list(voice.synthesize(...))`, which materialized the
+        entire clause — a 3-sentence clause paid ~1.5s before the first
+        chunk.)
+
+        Audio rate: the voice model's OWN sample rate (22050 for
+        en_US-lessac-medium) governs byte math; a fixed 16000 assumption
+        made every chunk ~27% too short in dur_ms AND broke the
+        char-allocation heuristic (expected_total_bytes was ~10x smaller
+        than real audio, so `covered < n` terminated the loop after ~2
+        chunks and discarded the rest of the clause).
+
+        Threading: the ENTIRE synthesis loop runs inside ONE executor
+        thread (onnxruntime/espeak state is not safe to poke with next()
+        from multiple threads — that deadlocks). Each produced sentence
+        is pushed to an asyncio.Queue via call_soon_threadsafe (a plain
+        cross-thread put_nowait only appends to _ready and does NOT
+        write the self-pipe — if the loop is blocked in epoll the item
+        is never observed: that was the streaming hang). This coroutine
+        consumes it sentence by sentence, so first audio still streams
+        at ~100ms while the worker keeps synthesizing the rest.
+
+        chars_covered: each sentence's chars are distributed across its
+        audio chunks by byte fraction; the LAST sentence absorbs the
+        remainder so the meter lands exactly on len(clause). Pause
+        chunks carry chars_covered=0 (silence is not text progress).
+        """
         voice = self._voice
         assert voice is not None
-        chunks = await asyncio.to_thread(
-            lambda: list(voice.synthesize(clause))
-        )
         n = len(clause)
         if n == 0:
             return
-        pcm = b"".join(c.audio_int16_bytes for c in chunks)
-        total_ms = int(len(pcm) / (self.sample_rate * 2) * 1000)
-        bytes_per_chunk = int(self.sample_rate * 2 * (self.chunk_ms / 1000.0))
-        if total_ms <= 0:
+        sentences = _split_sentences(clause)
+        if not sentences:
             return
-        chunks_out = max(1, total_ms // self.chunk_ms)
-        chars_per_chunk = n / chunks_out
+        sr = int(getattr(getattr(voice, "config", None), "sample_rate", self.sample_rate))
+        bytes_per_chunk = max(1, int(sr * 2 * (self.chunk_ms / 1000.0)))
+        base_length = float(getattr(getattr(voice, "config", None), "length_scale", 1.0))
+        base_noise = float(getattr(getattr(voice, "config", None), "noise_scale", 0.667))
+        base_noise_w = float(getattr(getattr(voice, "config", None), "noise_w_scale", 0.8))
+        # Unbounded queue + call_soon_threadsafe (see docstring).
+        queue: asyncio.Queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+
+        def _run() -> None:
+            try:
+                for idx, sentence in enumerate(sentences):
+                    cfg = _prosody_for(sentence, base_length, base_noise, base_noise_w)
+                    pcms = [c.audio_int16_bytes for c in voice.synthesize(sentence, syn_config=cfg)]
+                    pcms = [p for p in pcms if p]
+                    if not pcms:
+                        continue
+                    loop.call_soon_threadsafe(queue.put_nowait, ("audio", idx, pcms))
+                    pause_ms = _pause_ms_after(sentence)
+                    if pause_ms > 0:
+                        loop.call_soon_threadsafe(queue.put_nowait, ("pause", pause_ms))
+            except Exception:  # noqa: BLE001 — one bad sentence must not kill the turn
+                pass
+            finally:
+                loop.call_soon_threadsafe(queue.put_nowait, None)
+
+        task = asyncio.create_task(asyncio.to_thread(_run))
         covered = 0.0
-        remaining = total_ms
-        offset = 0
-        while remaining > 0 and covered < n:
-            data = pcm[offset : offset + bytes_per_chunk]
-            if not data:
+        while True:
+            item = await queue.get()
+            if item is None:
                 break
-            offset += len(data)
-            this_ms = min(self.chunk_ms, remaining)
-            start_c = int(covered)
-            end_c = min(n, int(covered + chars_per_chunk))
-            yield AudioChunk(
-                pcm=data,
-                dur_ms=this_ms,
-                chars_covered=max(0, end_c - start_c),
-            )
-            covered += chars_per_chunk
-            remaining -= this_ms
+            kind = item[0]
+            if kind == "pause":
+                pause_ms = item[1]
+                silence_bytes = int(sr * 2 * pause_ms / 1000)
+                off = 0
+                while off < silence_bytes:
+                    data = b"\x00" * min(bytes_per_chunk, silence_bytes - off)
+                    if not data:
+                        break
+                    this_ms = int(len(data) / (sr * 2) * 1000)
+                    yield AudioChunk(pcm=data, dur_ms=this_ms, chars_covered=0)
+                    off += len(data)
+                continue
+
+            # audio: ("audio", sentence_index, [pcm, ...])
+            idx = item[1]
+            pcms = item[2]
+            total_len = sum(len(p) for p in pcms)
+            if total_len <= 0:
+                continue
+            total_ms = int(total_len / (sr * 2) * 1000)
+            if total_ms <= 0:
+                continue
+            # Char budget for THIS sentence. The LAST sentence absorbs
+            # whatever chars remain (separators, split drift) so the
+            # meter ends exactly at len(clause).
+            if idx < len(sentences) - 1:
+                this_sent_chars = float(len(sentences[idx]))
+            else:
+                this_sent_chars = max(0.0, n - covered)
+            this_sent_chars = min(this_sent_chars, n - covered)
+            is_last_sentence = idx == len(sentences) - 1
+            bank = 0.0  # fractional-char accumulator (floor per chunk leaks)
+            for pcm in pcms:
+                sent_len = len(pcm)
+                if sent_len <= 0:
+                    continue
+                offset = 0
+                remaining_ms = int(sent_len / (sr * 2) * 1000)
+                is_last_pcm = pcm is pcms[-1]
+                while remaining_ms > 0:
+                    data = pcm[offset : offset + bytes_per_chunk]
+                    if not data:
+                        break
+                    offset += len(data)
+                    this_ms = min(self.chunk_ms, remaining_ms)
+                    frac = len(data) / total_len
+                    alloc = this_sent_chars * frac + bank
+                    chunk_chars = int(alloc)
+                    bank = alloc - chunk_chars
+                    # Tail: last chunk of the last sentence lands on n.
+                    if is_last_sentence and is_last_pcm and remaining_ms - this_ms <= 0:
+                        chunk_chars = int(n) - int(covered)
+                    chunk_chars = max(0, chunk_chars)
+                    yield AudioChunk(
+                        pcm=data,
+                        dur_ms=this_ms,
+                        chars_covered=chunk_chars,
+                    )
+                    covered += chunk_chars
+                    remaining_ms -= this_ms
+        with contextlib.suppress(Exception):
+            await task
 
     async def stream(self, clause: str, voice: str) -> AsyncIterator[AudioChunk]:
         # EP-010 M2: in-process synthesis is the fast path (model resident,
@@ -200,7 +413,11 @@ class PiperTTS:
                     this_ms = min(self.chunk_ms, remaining)
                     start_c = int(covered)
                     end_c = min(n, int(covered + chars_per_chunk))
-                    yield AudioChunk(pcm=data, dur_ms=this_ms, chars_covered=max(0, end_c - start_c))
+                    yield AudioChunk(
+                        pcm=data,
+                        dur_ms=this_ms,
+                        chars_covered=max(0, end_c - start_c),
+                    )
                     covered += chars_per_chunk
                     remaining -= this_ms
             finally:

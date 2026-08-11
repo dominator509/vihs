@@ -56,7 +56,7 @@ S=secret, N=non-secret. Env: dev/stage/prod/all.
 | VIHS_RUNPOD_ENV | no | stage,prod | (unset) | N | JSON object merged into pod container env (EP-009 M2) | JSON object |
 | VIHS_MODEL_DIR | pod | all | /workspace/models | N | network-volume mount | dir exists on pod |
 | VIHS_STT_MODEL / VIHS_STT_DEVICE / VIHS_STT_COMPUTE | no | stage,prod | base / cuda / float16 | N | real STT stage model settings (EP-009 M4; model_dir = $VIHS_MODEL_DIR/stt) | str / cuda\|cpu / float16\|int8 |
-| VIHS_TTS_BIN / VIHS_TTS_VOICE / VIHS_TTS_CUDA | no | stage,prod | piper / $VIHS_MODEL_DIR/tts/en_US-lessac-medium.onnx / 0 | N | real TTS stage binary + voice path (EP-009 M4); VIHS_TTS_CUDA=1 enables piper --cuda (EP-010 M2: in-process PiperVoice; model loaded once per pod, ~88ms short clause) | str / path / 0\|1 |
+| VIHS_TTS_BIN / VIHS_TTS_VOICE / VIHS_TTS_CUDA | no | stage,prod | piper / $VIHS_MODEL_DIR/tts/en_US-lessac-medium.onnx / 0 | N | real TTS stage binary + voice path (EP-009 M4); VIHS_TTS_CUDA=1 enables piper --cuda (EP-010 M2: in-process shared PiperVoice loaded once per pod; per-sentence streaming synthesis with natural cadence — punctuation-driven pauses + emotion prosody; no env knobs yet) | str / path / 0\|1 |
 | VIHS_MEMORYD_PUBLIC_ADDR | no | stage,prod | (unset) | N | public addr of memoryd for REMOTE pods (pod MemoryClient talks directly; EP-009 M4) | host:port |
 | VIHS_LLM_URL | pod | all | http://127.0.0.1:8000/v1 | N | vLLM OpenAI-compat endpoint | reachable in real mode |
 | VIHS_REAL_STAGES | no | dev | 0 | N | 1 = real GPU stages | 0/1 |

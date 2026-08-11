@@ -23,6 +23,89 @@ import json
 from collections.abc import AsyncIterator
 from typing import Any
 
+# Defensive envelope unwrap (EP-010 M2): some hosted RP models wrap the
+# whole reply in a JSON envelope `{"t": "assistant_output", "text": "..."}`.
+# Feeding that raw into TTS is wrong twice over: piper chokes on the JSON
+# syntax (curly braces/phonemization — measured: ~1.4s for the envelope
+# clause vs ~226ms first chunk for plain prose) and the avatar would
+# literally "speak" the JSON. This wrapper streams ONLY the inner text,
+# so the unwrap happens before chunking and TTS never sees the envelope.
+_ENVELOPE_PREFIX = '{"t": "assistant_output", "text": "'
+_ENVELOPE_SUFFIX = '"}'
+
+
+async def unwrap_assistant_envelope(
+    stream: AsyncIterator[str],
+) -> AsyncIterator[str]:
+    """Pass through LLM deltas, unwrapping a leading assistant envelope.
+
+    Normal prose is passed through with ZERO added latency (the first
+    delta is emitted as soon as it is proven not to be an envelope
+    prefix). Only when the stream begins with the envelope prefix do we
+    strip it; the inner text then streams immediately, sentence by
+    sentence, and a trailing `"}` (possibly split across deltas) is
+    dropped at the end. A stream that starts with `{` but diverges from
+    the envelope prefix is passed through untouched.
+    """
+
+    pending = ""  # pre-envelope accumulation (prefix matching only)
+    inside = False
+    tail = ""  # rolling 2-char buffer for a closing '"}' split across deltas
+
+    async for delta in stream:
+        if not inside:
+            pending += delta
+            probe = pending.lstrip()
+            if probe:
+                n = min(len(probe), len(_ENVELOPE_PREFIX))
+                if probe[:n] != _ENVELOPE_PREFIX[:n]:
+                    # Diverged from the envelope prefix — pass through raw.
+                    yield pending
+                    pending = ""
+                    async for d in stream:
+                        yield d
+                    return
+                if probe.startswith(_ENVELOPE_PREFIX):
+                    inside = True
+                    rest = probe[len(_ENVELOPE_PREFIX) :]
+                    pending = ""
+                    # Reuse the inside path for the rest (the closing '"}'
+                    # may already be in it).
+                    delta = rest
+                else:
+                    continue
+        else:
+            delta = tail + delta
+            tail = ""
+
+        # Inside the envelope: stream inner text; watch for the closing
+        # '"}' ANYWHERE in the accumulated data (normally the very end of
+        # the model's reply; if the model adds text after the envelope we
+        # pass that through too rather than dropping it).
+        close = delta.find(_ENVELOPE_SUFFIX)
+        if close >= 0:
+            yield delta[:close]
+            after = delta[close + len(_ENVELOPE_SUFFIX) :]
+            if after:
+                yield after
+            async for d in stream:
+                yield d
+            return
+        if len(delta) >= 2:
+            yield delta[:-2]
+            tail = delta[-2:]
+        else:
+            tail = delta
+
+    # End of stream.
+    if pending:
+        yield pending
+    if inside and tail:
+        if tail.endswith(_ENVELOPE_SUFFIX):
+            tail = tail[: -len(_ENVELOPE_SUFFIX)]
+        if tail:
+            yield tail
+
 
 class AxiomGatewayLLM:
     """LLM stage → AXIOM gateway (ADR-012). SSE chunks are `{"content": s}`.

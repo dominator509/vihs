@@ -101,7 +101,12 @@ async def run_response(
         ck, n = ClauseChunker(), 0
         _llm_start = time.perf_counter()
         _first = True
-        async for delta in st.llm.stream(prompt):
+        # EP-010 M2: defensively unwrap a `{"t": "assistant_output", ...}`
+        # envelope SOME RP models wrap their whole reply in — TTS must
+        # never speak JSON syntax (measured ~1.4s AND wrong audio).
+        from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+        async for delta in unwrap_assistant_envelope(st.llm.stream(prompt)):
             if gen != bus.fresh():
                 return  # stale: drop
             if _first and metrics is not None:
