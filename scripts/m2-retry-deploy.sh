@@ -15,6 +15,9 @@
 set -u
 cd /root/vihs
 export VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:v0.2.11
+# The driver's own ready-deadline must match the operator kill window so a
+# bad pod is killed at 7 min total, not 7 min after the driver's 45-min wait.
+export VIHS_READY_TIMEOUT=420
 export PROVIDER=vllm
 export VIHS_LLM_URL=http://127.0.0.1:8000/v1
 export VIHS_LLAMA_GGUF=/workspace/models/llama/Lexi-Q4_K_M.gguf
@@ -110,14 +113,31 @@ while [ "$attempt" -lt "$MAX_ATTEMPTS" ]; do
   # Driver ran; find the pod it created (if any) from the log.
   pod_id="$(grep -oE 'capacity: pod created [a-z0-9]+' "$LOG" | tail -1 | awk '{print $4}')"
   if [ -n "$pod_id" ]; then
-    if wait_and_maybe_kill "$pod_id" "$(date +%s)"; then
+    if grep -q "pod never Ready" "$LOG"; then
+      # The driver already burned the full ready window (VIHS_READY_TIMEOUT)
+      # waiting for this pod — kill it NOW, log the dispute, and retry.
+      # No second watch: 7 min of silence is a bad node, not a slow boot.
+      echo "[$(date +%H:%M:%S)] $pod_id never Ready in driver window — terminating per operator rule" >> "$LOG"
+      python3 deploy/runpod/terminate_pod.py "$pod_id" >> "$LOG" 2>&1
+      {
+        echo "### I-$(date +%Y-%m-%d)-AUTO — pod never Ready within ${VIHS_READY_TIMEOUT}s"
+        echo "- **Pod**: $pod_id"
+        echo "- **Created**: $(date '+%H:%M:%S') local · **Killed**: $(date '+%H:%M:%S') local"
+        echo "- **Symptom**: no agent registration / no readiness within ${VIHS_READY_TIMEOUT}s (operator 7-min rule)"
+        echo "- **Action**: automatic kill per operator rule; retry loop continues"
+        echo "- **Billing concern**: **YES — dispute** (pod billed while never usable)"
+        echo ""
+      } >> docs/runpod-issues-log.md
+      sed -i '/capacity: pod created/d' "$LOG"
+    elif wait_and_maybe_kill "$pod_id" "$(date +%s)"; then
       # Pod is READY and warm — ramp directly on it, then done.
       echo "[$(date +%H:%M:%S)] ramp on warm pod $pod_id" >> "$LOG"
       exit 0
+    else
+      # pod was killed or died — clear the marker so the next attempt's
+      # pod-created detection is fresh, then retry.
+      sed -i '/capacity: pod created/d' "$LOG"
     fi
-    # pod was killed or died — clear the marker so the next attempt's
-    # pod-created detection is fresh, then retry.
-    sed -i '/capacity: pod created/d' "$LOG"
   fi
   sleep "$RETRY_SLEEP"
 done

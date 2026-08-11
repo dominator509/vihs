@@ -114,6 +114,24 @@ Operator rules (2026-08-11, kill window tightened to 7 min):
   30-min watch before this session), never usable (no agent, no registration,
   no report lines).
 
+### I-2026-08-11-07 — Bad node, killed per 7-min rule (gqwksjzmljp3ds)
+- **Pod**: gqwksjzmljp3ds (name vihs-capacity-4090, image v0.2.11 baked)
+- **Created**: ~20:37:46 local · **Killed**: ~20:48 local (~10 min billed)
+- **Symptom**: container started (runtime present, ports 8093→public
+  assigned) but NO orchestrator registration (no fresh staging-4090 entry),
+  NO fresh lines in /tmp/pod-reports.log after creation — agent never
+  reached the report-forwarder stage. First v0.2.11 (baked-wheels) pod;
+  image pull + llama wheel install still happens at boot, so the stall is
+  again node-side.
+- **Evidence**: RunPod runtime True + ports; orchestrator /admin/pods only
+  ever showed the OLD dead staging-4090 (v0.2.10, last_ping 41k s);
+  /tmp/pod-reports.log line count static at 10863 across a 60s+ window.
+- **Action**: terminated per operator 7-min rule. (Also found and fixed:
+  the retry driver had its own hardcoded 2700s ready-deadline, which made
+  the script-level 420s watch moot — VIHS_READY_TIMEOUT now propagates 420
+  and the script kills immediately on "pod never Ready".)
+- **Billing concern**: **YES — dispute.** ~10 min billed, never usable.
+
 ---
 
 ## Dispute summary (draft)
@@ -124,8 +142,9 @@ Operator rules (2026-08-11, kill window tightened to 7 min):
 | I-03 | ab9mgl4xxp33r2 | ~36 min (19:04–19:40) | YES — broken node, never usable | OPEN |
 | I-05 | e83mgcakbwb877 | ~27 min (19:41–20:08) | YES — broken node, never usable | OPEN |
 | I-06 | 4lby9klwrazkav | ~2h11m (20:07–22:1x, mostly under old 30-min watch) | YES — never registered agent | OPEN |
+| I-07 | gqwksjzmljp3ds | ~10 min (20:38–20:48) | YES — never registered agent | OPEN |
 
-Total disputed to date: ~4h of billed-but-unusable instance time.
+Total disputed to date: ~4h10m of billed-but-unusable instance time.
 
 Support contact notes: account doministic@gmail.com; instance IDs above;
 symptom = container crash-loop / no agent registration / no port 8093

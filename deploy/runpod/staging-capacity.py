@@ -169,8 +169,13 @@ def main() -> int:
 
     try:
         # Wait for orchestrator Ready (registration + assign WS).
+        # Operator rule: a pod that returns NOTHING within the ready window
+        # is a bad node — healthy pods boot ~110s, and RunPod itself marks
+        # workers unhealthy past 7 min. VIHS_READY_TIMEOUT lets the retry
+        # loop set 420s (default 2700s preserved for manual/other callers).
         admin_tok = env.get("VIHS_ADMIN_TOKEN", "")
-        ready_deadline = time.monotonic() + 2700
+        ready_timeout = int(env.get("VIHS_READY_TIMEOUT", "2700"))
+        ready_deadline = time.monotonic() + ready_timeout
         ready = False
         while time.monotonic() < ready_deadline:
             try:
@@ -192,6 +197,8 @@ def main() -> int:
         cold_start_s = round(time.monotonic() - t0, 1)
         if not ready:
             print(f"capacity: pod never Ready after {cold_start_s}s", file=sys.stderr)
+            if not keep_warm:
+                api("DELETE", f"/v2/pods/{pod_id}")
             return 1
         print(f"capacity: pod READY cold_start={cold_start_s}s")
 
