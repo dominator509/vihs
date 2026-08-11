@@ -119,5 +119,23 @@ All drills re-runnable.
   CUDA wheel dlopens libgomp.so.1); server-extra dep closure staged
   (starlette-context<0.4, typing-inspection, etc). GGUF persists on the
   volume — subsequent boots skip the 4.9GB download.
+- 2026-08-11 CONTENTION ROOT CAUSE + FIX (v0.2.10, commit 9475489): pod
+  tts_ttfa stayed 1.4–1.7s (vs ~300ms local) even with the local LLM.
+  Root cause proven by local simulation: onnxruntime defaults to ALL
+  cores (intra_op_num_threads=0), so piper thrashes llama-server on the
+  same vCPUs (synth 327→478ms under 4-process contention, 1.46×). OMP
+  NUM_THREADS is IGNORED by onnxruntime 1.28. FIX: build the PiperVoice
+  ONNX session with a bounded intra-op pool (VIHS_TTS_THREADS, default
+  2); bounded synth is contention-immune (323→298ms, 0.92×). Deployed +
+  MEASURED on the settled v0.2.10 pod (6-turn warm probe): tts_ttfa p50
+  68–152ms (budget 300ms, was 1397–1668ms — 9–20× faster, MET); llm_ttft
+  26–185ms warm (MET 400ms). Residual p95 tail to 600ms = longest single
+  clause length, not CPU thrash. Capacity: sessions_per_gpu=0 — binding
+  constraint is tts_ttfa p95 on the worst clause.
+- 2026-08-11 OPERATOR DECISION: KEEP VIHS_TTS_THREADS=2. Tail is
+  clause-length-bound, not contention; higher thread counts would only
+  steal headroom from llama-server for no p95 gain. Re-derive M2
+  sessions_per_gpu on the next deploy when needed (expect >0 once the
+  tts_ttfa p95 budget is re-examined per the M2 gap log).
 
 ## 15. Outcomes & Retrospective
