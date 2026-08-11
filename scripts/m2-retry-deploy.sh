@@ -3,6 +3,12 @@
 # US-IL-1 4090 is transiently exhausted; retry the capacity driver
 # (--keep-warm) every RETRY_SLEEP seconds until it derives a number.
 # Each driver run creates a pod, runs the ramp, and leaves it warm.
+#
+# OPERATOR RULE (2026-08-11): NEVER terminate pods here — cold boots are
+# slow and eat usage time. Once a pod runs, keep it warm and reuse it.
+# If a pod is unusable (crash-loop / no agent), record it in
+# docs/runpod-issues-log.md for billing dispute, then terminate ONLY via
+# explicit operator instruction or an ExecPlan requirement.
 set -u
 cd /root/vihs
 export VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:v0.2.10
