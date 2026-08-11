@@ -3,15 +3,18 @@
 # US-IL-1 4090 is transiently exhausted; retry the capacity driver
 # (--keep-warm) until it derives a number.
 #
-# OPERATOR RULE (2026-08-11, amended 20:05):
+# OPERATOR RULE (2026-08-11, amended 20:05; tightened 22:xx):
 #  - NEVER terminate a HEALTHY pod — cold boots are slow and eat usage time.
 #    Once a pod runs fluidly, keep it warm and reuse it.
-#  - If a pod returns NOTHING within POD_MAX_WARM_SECONDS (default 1800s =
-#    30 min — no agent registration, no health, no logs), TERMINATE it and
-#    retry. Log the incident in docs/runpod-issues-log.md for billing dispute.
+#  - If a pod returns NOTHING within POD_MAX_WARM_SECONDS (default 420s =
+#    7 min — no agent registration, no health, no logs), TERMINATE it and
+#    retry. 7 min matches RunPod's own unhealthy-worker threshold (>7 min
+#    cold start = worker marked unhealthy) and our healthy pods boot in
+#    ~110s; a pod silent past 7 min is a bad node, not a slow boot.
+#    Log the incident in docs/runpod-issues-log.md for billing dispute.
 set -u
 cd /root/vihs
-export VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:v0.2.10
+export VIHS_RUNPOD_IMAGE=ttl.sh/vihs-pod-slimlauncher:v0.2.11
 export PROVIDER=vllm
 export VIHS_LLM_URL=http://127.0.0.1:8000/v1
 export VIHS_LLAMA_GGUF=/workspace/models/llama/Lexi-Q4_K_M.gguf
@@ -22,7 +25,7 @@ LOG=/tmp/m2-retry-loop.log
 : > "$LOG"   # per-run log: the pod-created stop-check must not see prior runs
 RETRY_SLEEP="${RETRY_SLEEP:-90}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-40}"
-POD_MAX_WARM_SECONDS="${POD_MAX_WARM_SECONDS:-1800}"
+POD_MAX_WARM_SECONDS="${POD_MAX_WARM_SECONDS:-420}"
 attempt=0
 
 # Resolve the admin token once (for the ready check below).

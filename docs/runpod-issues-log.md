@@ -9,11 +9,14 @@ action taken, billing concern (YES/NO/UNCERTAIN).
 Evidence artifacts live in `docs/runpod-evidence/` (committed). Raw console
 dumps are also on this host under /tmp with the file names listed.
 
-Operator rules (2026-08-11):
+Operator rules (2026-08-11, kill window tightened to 7 min):
 1. Do NOT terminate a HEALTHY pod — cold boots are slow and eat usage time.
    Once a pod runs fluidly, keep it warm and reuse it for all evidence.
-2. Kill-and-retry a pod that returns NOTHING for 30 minutes (no agent
-   registration, no health, no logs) — enforced by scripts/m2-retry-deploy.sh.
+2. Kill-and-retry a pod that returns NOTHING for 7 minutes (no agent
+   registration, no health, no logs) — enforced by scripts/m2-retry-deploy.sh
+   (POD_MAX_WARM_SECONDS=420). Rationale: healthy pods boot in ~110s and
+   RunPod itself marks workers unhealthy when cold start exceeds 7 min, so
+   silence past 7 min is a bad node, not a slow boot.
 
 ---
 
@@ -94,10 +97,22 @@ Operator rules (2026-08-11):
 - **Action**: terminated per operator 30-min rule
 - **Billing concern**: **YES — dispute.** Pod billed ~27 min, never usable.
 
-### I-2026-08-11-06 — IN PROGRESS: 4lby9klwrazkav (current attempt)
-- **Pod**: 4lby9klwrazkav created ~20:07:35 local by enforcement loop
-- **Status**: under 30-min watch; will keep warm if it becomes usable
-- **Billing concern**: watch — log if it returns nothing.
+### I-2026-08-11-06 — Bad node, killed per 7-min rule (4lby9klwrazkav)
+- **Pod**: 4lby9klwrazkav (name vihs-capacity-4090, image v0.2.10)
+- **Created**: ~20:07:35 local (enforcement loop attempt 1) · **Killed**: ~22:1x
+  local (~2h11m billed, of which the last ~7+ min watched under the new rule;
+  the pod was created and watched under the prior 30-min rule, then both
+  background loops were SIGTERMed, leaving it unwatched until this session)
+- **Symptom**: ports assigned (8093→public) but NO agent registration in the
+  orchestrator (no new staging-4090 entry), ZERO lines in /tmp/pod-reports.log,
+  logs endpoint returns nothing — container never became usable
+- **Evidence**: RunPod GraphQL uptime ~453s at kill check; orchestrator
+  /admin/pods shows only dead entries; /tmp/pod-reports.log grep = 0 lines
+- **Action**: terminated per operator 7-min rule (tightened from 30 min;
+  healthy pods boot ~110s, RunPod unhealthy threshold is 7 min)
+- **Billing concern**: **YES — dispute.** Billed ~2h11m (mostly under the old
+  30-min watch before this session), never usable (no agent, no registration,
+  no report lines).
 
 ---
 
@@ -108,8 +123,9 @@ Operator rules (2026-08-11):
 | I-02 | ryqiz3rqtqs9kd | ~46 min (18:06–18:52) | YES — broken node, never usable | OPEN |
 | I-03 | ab9mgl4xxp33r2 | ~36 min (19:04–19:40) | YES — broken node, never usable | OPEN |
 | I-05 | e83mgcakbwb877 | ~27 min (19:41–20:08) | YES — broken node, never usable | OPEN |
+| I-06 | 4lby9klwrazkav | ~2h11m (20:07–22:1x, mostly under old 30-min watch) | YES — never registered agent | OPEN |
 
-Total disputed to date: ~1h49m of billed-but-unusable instance time.
+Total disputed to date: ~4h of billed-but-unusable instance time.
 
 Support contact notes: account doministic@gmail.com; instance IDs above;
 symptom = container crash-loop / no agent registration / no port 8093
@@ -162,58 +178,55 @@ instance time. Reference RunPod's own ">7 min = unhealthy" init guidance
 
 ---
 
-## Are we baking models into images? — no, and why
+## Are we baking models into images? — wheels yes (as of v0.2.11), models no
 
-**Current state: NO.** Nothing model-sized is baked into the pod image.
+**Current state (2026-08-11): the runtime wheel closure IS baked; model
+weights are NOT.**
 
-What the image (`deploy/docker/pod-slim.Dockerfile`) actually contains:
+What the image (`deploy/docker/pod-slim.Dockerfile`) now contains:
 - python:3.12-slim base + GStreamer + libgomp1 + libcudart (~100MB
   compressed total)
 - The pod Python package (tiny, ~1MB)
-- NO piper/whisper/llama wheels, NO GGUF, NO voice model
+- **The 56-wheel runtime closure (~180MB) installed at BUILD time** —
+  aiortc, av, websockets, numpy, httpx, faster-whisper, piper-tts and all
+  transitive deps (v0.2.11; wheelhouse fetched from the operator mirror
+  during build, then removed from the image layer). Marker
+  /opt/vihs-wheels-installed makes slim-boot.sh skip boot-time pip.
+- NO llama-cpp-python wheel (1.36GB — deliberately left at boot), NO GGUF,
+  NO voice model
 
-What happens at every cold boot (`deploy/docker/slim-boot.sh`):
-1. `pip install --no-index` 57 wheels (~160MB) from OUR operator box
-   (http://66.94.123.250:8099/wheels-full/) — the step where I-02 stalled
+What still happens at every cold boot (`deploy/docker/slim-boot.sh`):
+1. (Skipped when baked) — the wheel install step that stalled on I-02 is
+   GONE. Only llama-cpp-python (1.36GB) installs here, and only when
+   VIHS_LLAMA_GGUF is set, with a 10-try retry loop
 2. Optionally download the 4.9GB GGUF from the same box if not on the
    volume
 3. Copy the 63MB Piper voice model from the network volume to local disk
 4. Start llama-server + the agent
 
-Why we do NOT bake them in (deliberate, recorded in EP-009 M4 Decision Log):
-- **ttl.sh pull speed.** We push to ttl.sh (ephemeral anonymous registry)
-  because we have no Docker Hub push creds. Cold-node pulls from ttl.sh are
-  slow (~6s/MB observed; the earlier CUDA-fat image took >45 min). Baking
-  in 160MB of wheels + 4.9GB GGUF + voice would make the image ~5GB and the
-  pull itself becomes the slow step — potentially worse than the current
-  runtime download from our mirror (which is fast on HEALTHY nodes).
-- **Weights-never-in-image** is an existing design rule (Dockerfile
-  comment; weights live on the network volume, mounted read-mostly).
-- **Volume persistence.** The GGUF and voice already persist on the network
-  volume, so a healthy cold boot pays the 4.9GB only once (download is
-  skipped when the file exists). The recurring cost is the 160MB wheel set.
-
-How baking WOULD affect us (if we got fast registry creds, e.g. Docker Hub
-or GHCR with a decent mirror):
-- **Pro**: eliminate the runtime pip step entirely → cold boot becomes
-  "pull image + start process". Removes the exact stall window that killed
-  I-02 (wheel fetch from our box mid-boot).
-- **Pro**: fewer moving parts at boot; less dependence on the operator box
-  being reachable from every node.
-- **Con**: image grows ~160MB (wheels) → +~1.5 min on ttl.sh pulls at
-  observed rates; baking the 4.9GB GGUF too would add ~50+ min on ttl.sh —
-  a net LOSS unless we move to a fast registry.
-- **Net recommendation**: bake ONLY the wheel closure (~160MB) into the
-  image once we can push to a fast registry (Docker Hub creds or a GHCR
-  mirror); keep GGUF + voice on the volume. This shrinks boot to a
-  single predictable step and removes the stall window without a 5GB image.
+Why bake wheels but NOT models (decision 2026-08-11, user-approved):
+- **Bake the wheels** because the boot-time pip step was the I-02 stall
+  window (node egress to our mirror stalled mid-install). A cold boot now
+  has NO operator-box dependency for the base closure.
+- **Do NOT bake the 1.36GB llama wheel or the 4.9GB GGUF** — image would
+  balloon to ~1.8GB+ and ttl.sh pulls (already ~6s/MB on cold nodes) would
+  take hours, which is worse than the stall we're fixing.
+- **GGUF + voice persist on the network volume** (weights-never-in-image
+  design rule; volume mount read-mostly) — paid once, skipped on reboot.
+- **Size cost of the bake**: v0.2.10 compressed ~93MB → v0.2.11 ~264MB.
+  Measured on the next real pod boot; if the pull-time penalty exceeds the
+  removed install time on healthy nodes, revisit (v0.2.10 remains tagged as
+  fallback).
+- The ttl.sh pull itself was never the stall (I-02 pulled the image fine at
+  16:22Z then stalled on wheels at 17:01Z) — so a larger pull is acceptable;
+  the crash-loop signature is node-side.
 
 Relevant files to review:
-- deploy/docker/pod-slim.Dockerfile (what is/isn't baked)
-- deploy/docker/slim-boot.sh (what runs at boot — wheels, GGUF, voice copy)
-- deploy/docker/pod.Dockerfile (the full CUDA image, wheels baked at
-  build time — we do NOT use this for staging because its 379MB size pulled
-  >45 min from GHCR/ttl.sh on cold nodes; EP-009 M4 decision)
+- deploy/docker/pod-slim.Dockerfile (bake step, ARG VIHS_WHEEL_BASE)
+- deploy/docker/slim-boot.sh (llama retry, GGUF, voice copy)
+- deploy/docker/pod.Dockerfile (the full CUDA image — we do NOT use this
+  for staging because its 379MB size pulled >45 min from GHCR/ttl.sh on
+  cold nodes; EP-009 M4 decision)
 
 ---
 

@@ -137,5 +137,19 @@ All drills re-runnable.
   steal headroom from llama-server for no p95 gain. Re-derive M2
   sessions_per_gpu on the next deploy when needed (expect >0 once the
   tts_ttfa p95 budget is re-examined per the M2 gap log).
+- 2026-08-11 NODE-QUALITY + BAKE DECISION (v0.2.11): 3 consecutive bad
+  US-IL-1 nodes (I-02/I-03/I-05: stalled wheel pulls, zero logs,
+  crash-loops; +I-06 4lby9klwrazkav unwatched 2h after loops were
+  SIGTERMed). Healthy pods boot the SAME image in ~110s → node luck, not
+  image. Operator tightened the kill window 30 min → 7 min
+  (POD_MAX_WARM_SECONDS=420; matches RunPod's own >7-min unhealthy
+  threshold). Operator approved baking: the 56-wheel runtime closure
+  (~180MB) is now installed at BUILD time (Dockerfile fetches from the
+  operator mirror during build, then removes the wheelhouse) so a cold
+  boot never pip-installs from our box — removing the I-02 stall window.
+  Deliberately NOT baked: 1.36GB llama-cpp-python wheel (stays at boot,
+  now with a 10-try retry), 4.9GB GGUF + voice (network volume,
+  weights-never-in-image). Cost: image compressed ~93MB → ~264MB; measure
+  on the next real boot, v0.2.10 kept as fallback.
 
 ## 15. Outcomes & Retrospective

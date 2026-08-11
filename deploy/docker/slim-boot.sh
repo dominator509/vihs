@@ -1,11 +1,20 @@
 #!/bin/sh
-# VIHS pod slim bootstrap — install runtime wheels from the operator box,
-# then exec the real agent. Baked into the slim launcher image.
+# VIHS pod slim bootstrap — install the llama-cpp-python wheel (not baked;
+# 1.36GB) and prep local models, then exec the real agent. Baked into the
+# slim launcher image.
+#
+# EP-010 M2 (bake): the base runtime wheel closure (56 wheels, ~180MB) is
+# installed at BUILD time (see pod-slim.Dockerfile) and marked with
+# /opt/vihs-wheels-installed, so a cold boot no longer pip-installs from the
+# operator box — that step is where bad nodes stalled (I-02). Only the
+# 1.36GB llama-cpp-python wheel installs here, and only when VIHS_LLAMA_GGUF
+# is set; the GGUF (4.9GB) and Piper voice (63MB) stay on the network volume
+# and are copied/downloaded locally once.
 #
 # The wheel mirror lives on the operator box (66.94.123.250:8099) — the
 # same host pods are proven to reach at speed (581MB cublas wheel). The
-# mirror holds the FULL dependency closure (38 wheels, 159MB), so this
-# runs with --no-index and needs no PyPI access.
+# mirror holds the FULL dependency closure, so installs run with --no-index
+# and need no PyPI access.
 #
 # EP-009 M4 diagnosis: when VIHS_LOG_POST is set, every agent stdout line
 # is POSTed to that URL (the operator report server) so pod-side failures
@@ -79,8 +88,20 @@ fi
 # sends the same preamble every turn, so repeated prefill is skipped).
 if [ -n "${VIHS_LLAMA_GGUF:-}" ]; then
     echo "slim-boot: local LLM enabled (GGUF: $VIHS_LLAMA_GGUF)"
-    pip install --no-index --trusted-host 66.94.123.250 --find-links "$WHEEL_BASE" \
-        "llama-cpp-python[server]==0.3.19"
+    # llama-cpp-python is NOT baked (1.36GB wheel; would balloon the image).
+    # Retry the install like the GGUF download: a bad node's egress can
+    # stall mid-fetch (I-02 pattern), and one retry is cheaper than a
+    # crash-looping boot.
+    _tries=0
+    while [ "$_tries" -lt 10 ]; do
+        _tries=$((_tries + 1))
+        if pip install --no-index --trusted-host 66.94.123.250 --find-links "$WHEEL_BASE" \
+            "llama-cpp-python[server]==0.3.19"; then
+            break
+        fi
+        echo "slim-boot: llama wheel install failed (try $_tries) — retrying"
+        sleep 3
+    done
     if [ ! -f "$VIHS_LLAMA_GGUF" ]; then
         mkdir -p "$(dirname "$VIHS_LLAMA_GGUF")"
         echo "slim-boot: downloading GGUF from ${VIHS_LLAMA_GGUF_URL:-<unset>}"

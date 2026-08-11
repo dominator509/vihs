@@ -14,3 +14,4 @@ __pycache__/
 # Local artifacts
 .test-artifacts/
 *.log
+deploy/docker/wheelhouse/

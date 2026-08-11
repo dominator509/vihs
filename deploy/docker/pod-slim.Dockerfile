@@ -45,6 +45,34 @@ COPY deploy/docker/cudart/ /usr/local/cuda/lib64/
 COPY pod/ /workspace/pod/
 RUN pip install --no-deps /workspace/pod
 
+# EP-010 M2 (bake): the runtime wheel closure (56 wheels, ~180MB) is baked
+# into the image at build time so a cold boot NEVER pip-installs from the
+# operator box. This removes the exact stall window that killed I-02 (node
+# egress to our mirror stalled mid-install). The 1.36GB llama-cpp-python
+# wheel and the 4.9GB GGUF + voice model are deliberately NOT baked (image
+# would balloon to ~1.8GB and ttl.sh pulls would take hours on cold nodes);
+# slim-boot.sh installs llama only when VIHS_LLAMA_GGUF is set, and the
+# GGUF/voice persist on the network volume.
+# The wheelhouse is fetched from the operator mirror at BUILD time (builds
+# happen on the operator box; the mirror serves the full closure). It is
+# removed after install so the wheel files do not ship in the image.
+ARG VIHS_WHEEL_BASE=http://66.94.123.250:8099/wheels-full
+RUN mkdir -p /opt/wheelhouse \
+    && for f in $(curl -s "$VIHS_WHEEL_BASE/" | grep -oE 'href="[^"]+\.whl"' | sed 's|.*/||;s/"//'); do \
+         case "$f" in llama_cpp_python*) continue;; esac; \
+         curl -s -o "/opt/wheelhouse/$f" "$VIHS_WHEEL_BASE/$f" || exit 1; \
+       done \
+    && pip install --no-index --trusted-host localhost --find-links /opt/wheelhouse \
+        aiortc==1.15.0 \
+        av==17.1.0 \
+        websockets==17.0.1 \
+        numpy==2.5.1 \
+        httpx==0.28.1 \
+        faster-whisper==1.2.1 \
+        piper-tts==1.6.0 \
+    && touch /opt/vihs-wheels-installed \
+    && rm -rf /opt/wheelhouse
+
 # Bootstrap: fetch + install runtime wheels, then run the agent.
 COPY deploy/docker/slim-boot.sh /usr/local/bin/slim-boot.sh
 RUN chmod +x /usr/local/bin/slim-boot.sh
