@@ -37,12 +37,12 @@ from typing import Any
 import re
 
 _ENVELOPE_SUFFIX = '"}'
-_ROLE_RE = re.compile(r"^\s*\*\*[^*]+\*\*:\s*")
 # ANY envelope: {"t": <anything>, "text": " — matches both
 # "assistant_output" and the Lexi model's "bot_input" variants.
 _ENVELOPE_RE = re.compile(r'^\{\s*"t"\s*:\s*"[^"]*"\s*,\s*"text"\s*:\s*"')
 _FIXED_HEAD = '{"t": "'
 _FIXED_TAIL = '", "text": "'
+_ROLE_WORDS = ("user", "assistant", "system", "bot", "narrator", "ai")
 
 
 def _envelope_head_state(probe: str) -> str:
@@ -69,36 +69,73 @@ def _envelope_head_state(probe: str) -> str:
     return "no"
 
 
-def _prefix_state(probe: str) -> tuple[str, str]:
-    """Classify a RAW probe (role prefix + envelope head combined).
+def _match_role_prefix(p: str) -> tuple[str, str] | None:
+    """Detect a leading role prefix on a raw probe.
 
-    Returns (state, rest): 'no' → diverged (pass through raw); 'prefix'
-    → keep accumulating; 'match' → full envelope head matched and `rest`
-    is the text after it. A leading `**Role**: ` markdown prefix (the
-    Lexi model's `**Assistant**: {"t": "bot_input", ...}` shape) is
-    stripped when present; a `**` that does NOT close with `:` (bold
-    prose) diverges immediately.
+    Handles the shapes the RP models actually emit:
+      `**Assistant**: {"t": ...}`          (markdown bold role)
+      `**Assistant** (04:45): {"t": ...}`  (markdown + timestamp)
+      `user: {"t": ...}`                   (plain transcript role)
+    Returns ("prefix", "") while the prefix is still accumulating,
+    ("role", <rest>) when a full role prefix was consumed, or None when
+    the probe cannot be a role prefix (e.g. bold/emphasis prose like
+    `**bold** text` — those must pass through untouched).
     """
-    p = probe.lstrip()
     if p.startswith("**"):
         close = p.find("**", 2)
         if close == -1:
             return ("prefix", "")
-        after = p[close + 2 :]
+        after = p[close + 2 :].lstrip()
+        # Optional parenthetical metadata ("(04:45):").
+        if after.startswith("("):
+            end = after.find(")")
+            if end == -1:
+                return ("prefix", "")
+            after = after[end + 1 :].lstrip()
         if not after.startswith(":"):
-            return ("no", "")  # bold/emphasis prose, not a role prefix
+            return None  # bold/emphasis prose, not a role prefix
         rest = after[1:].lstrip()
-        if not rest:
-            return ("prefix", "")  # wait for the envelope head
-        probe = rest
-    if not probe.startswith("{"):
-        return ("no", "")
-    state = _envelope_head_state(probe)
+        return ("prefix", "") if not rest else ("role", rest)
+    # Plain transcript role: "user: ", "assistant: ", ...
+    m = re.match(r"^([a-z]+)\s*:\s*", p)
+    if m and m.group(1) in _ROLE_WORDS:
+        rest = p[m.end() :]
+        return ("prefix", "") if not rest else ("role", rest)
+    # Still accumulating a role word ("us", "user", "user:").
+    m = re.match(r"^([a-z]+)\s*:?\s*$", p)
+    if m and any(w.startswith(m.group(1)) for w in _ROLE_WORDS):
+        return ("prefix", "")
+    return None
+
+
+def _after_role(p: str) -> tuple[str, str]:
+    """Classify text AFTER a consumed role prefix (or no prefix at all).
+
+    Returns (state, rest): 'no' → pass through raw; 'prefix' → keep
+    accumulating; 'match' → full envelope head matched, `rest` is the
+    inner text; 'strip' → role prefix consumed but no envelope follows,
+    emit `rest` (the avatar should not speak "user:" labels).
+    """
+    if not p.startswith("{"):
+        return ("strip", p)
+    state = _envelope_head_state(p)
     if state == "no":
         return ("no", "")
     if state == "prefix":
         return ("prefix", "")
-    return ("match", probe[_envelope_head_end(probe) :])
+    return ("match", p[_envelope_head_end(p) :])
+
+
+def _prefix_state(probe: str) -> tuple[str, str]:
+    """Classify a RAW probe (role prefix + envelope head combined)."""
+    p = probe.lstrip()
+    role = _match_role_prefix(p)
+    if role is None:
+        return _after_role(p)
+    state, rest = role
+    if state == "prefix":
+        return ("prefix", "")
+    return _after_role(rest)
 
 
 def _envelope_head_end(probe: str) -> int:
@@ -140,7 +177,15 @@ async def unwrap_assistant_envelope(
                 return
             if state == "prefix":
                 continue
-            # Full envelope head matched: enter inside with the rest.
+            if state == "strip":
+                # Role prefix consumed but no envelope follows — emit the
+                # stripped text, then pass the rest of the stream through.
+                if rest:
+                    yield rest
+                async for d in stream:
+                    yield d
+                return
+            # state == "match": full envelope head matched; enter inside.
             inside = True
             pending = ""
             delta = rest

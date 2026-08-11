@@ -267,6 +267,37 @@ async def test_unwrap_assistant_envelope_bold_prose_untouched() -> None:
     assert got == "**bold** text"
 
 
+async def test_unwrap_assistant_envelope_plain_role_prefix() -> None:
+    """A plain transcript-role prefix (`user: {"t": ..., "text": ...}`)
+    is stripped and unwrapped like the markdown role variant."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        for piece in [
+            "user: {\"t\": \"assist",
+            "ant_output\", \"text\": \"Hel",
+            "lo there!\"}",
+        ]:
+            yield piece
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "Hello there!"
+
+
+async def test_unwrap_assistant_envelope_role_strip_no_envelope() -> None:
+    """`**Assistant** (04:45): Hello!` — role prefix without an envelope
+    is stripped; the plain text passes through."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        yield "**Assist"
+        yield "ant** (04:45): "
+        yield "Hello there!"
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "Hello there!"
+
+
 def test_tts_split_sentences_abbrev_aware() -> None:
     """Cadence layer splits on sentence boundaries, never inside
     abbreviations, decimals, or ellipses."""
