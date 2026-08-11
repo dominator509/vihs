@@ -235,6 +235,38 @@ async def test_unwrap_assistant_envelope_non_envelope_json() -> None:
     assert got == '{"foo": "bar"} tail'
 
 
+async def test_unwrap_assistant_envelope_bot_input_role_prefix() -> None:
+    """The Lexi RP model wraps replies as `**Assistant**: {"t":
+    "bot_input", "text": ...}` — role prefix AND a different envelope
+    type must both be stripped."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        for piece in [
+            "**Assist",
+            "ant**: {\"t\": \"bot_",
+            "input\", \"text\": \"Hel",
+            "lo! How are you",
+            ' doing?\"}',
+        ]:
+            yield piece
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "Hello! How are you doing?"
+
+
+async def test_unwrap_assistant_envelope_bold_prose_untouched() -> None:
+    """`**bold** prose` must NOT be mistaken for a role prefix envelope."""
+    from vihs_pod.pipeline.llm import unwrap_assistant_envelope
+
+    async def gen():
+        yield "**bold**"
+        yield " text"
+
+    got = "".join([d async for d in unwrap_assistant_envelope(gen())])
+    assert got == "**bold** text"
+
+
 def test_tts_split_sentences_abbrev_aware() -> None:
     """Cadence layer splits on sentence boundaries, never inside
     abbreviations, decimals, or ellipses."""

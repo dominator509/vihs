@@ -24,28 +24,103 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 # Defensive envelope unwrap (EP-010 M2): some hosted RP models wrap the
-# whole reply in a JSON envelope `{"t": "assistant_output", "text": "..."}`.
-# Feeding that raw into TTS is wrong twice over: piper chokes on the JSON
-# syntax (curly braces/phonemization — measured: ~1.4s for the envelope
-# clause vs ~226ms first chunk for plain prose) and the avatar would
-# literally "speak" the JSON. This wrapper streams ONLY the inner text,
-# so the unwrap happens before chunking and TTS never sees the envelope.
-_ENVELOPE_PREFIX = '{"t": "assistant_output", "text": "'
+# whole reply in a JSON envelope `{"t": "assistant_output", "text": "..."}`
+# — and the local Lexi roleplay model emits an even richer variant:
+# `**Assistant**: {"t": "bot_input", "text": "..."}` (markdown role
+# prefix + a DIFFERENT envelope type). Feeding any of that raw into TTS
+# is wrong twice over: piper chokes on the JSON syntax (curly
+# braces/phonemization — measured: ~1.4s for the envelope clause vs
+# ~226ms first chunk for plain prose) and the avatar would literally
+# "speak" the JSON. This wrapper strips the markdown role prefix, then
+# unwraps ANY `{"t": <anything>, "text": "..."}` envelope, so TTS never
+# sees JSON syntax regardless of which model produced it.
+import re
+
 _ENVELOPE_SUFFIX = '"}'
+_ROLE_RE = re.compile(r"^\s*\*\*[^*]+\*\*:\s*")
+# ANY envelope: {"t": <anything>, "text": " — matches both
+# "assistant_output" and the Lexi model's "bot_input" variants.
+_ENVELOPE_RE = re.compile(r'^\{\s*"t"\s*:\s*"[^"]*"\s*,\s*"text"\s*:\s*"')
+_FIXED_HEAD = '{"t": "'
+_FIXED_TAIL = '", "text": "'
+
+
+def _envelope_head_state(probe: str) -> str:
+    """Classify a role-stripped probe against the envelope head.
+
+    Returns 'match' when the FULL `{"t": <type>, "text": "` head is
+    present (with the match end in _envelope_head_end), 'prefix' when
+    the probe is a prefix that could still become a match (keep
+    accumulating), or 'no' when it has diverged (pass through raw).
+    """
+    if not probe.startswith(_FIXED_HEAD):
+        if _FIXED_HEAD.startswith(probe):
+            return "prefix"
+        return "no"
+    rest = probe[len(_FIXED_HEAD) :]
+    i = rest.find('"')
+    if i == -1:
+        return "prefix"  # still inside the type string
+    tail = rest[i:]
+    if tail.startswith(_FIXED_TAIL):
+        return "match"  # head complete (tail may already contain text)
+    if _FIXED_TAIL.startswith(tail):
+        return "prefix"  # still accumulating the fixed tail
+    return "no"
+
+
+def _prefix_state(probe: str) -> tuple[str, str]:
+    """Classify a RAW probe (role prefix + envelope head combined).
+
+    Returns (state, rest): 'no' → diverged (pass through raw); 'prefix'
+    → keep accumulating; 'match' → full envelope head matched and `rest`
+    is the text after it. A leading `**Role**: ` markdown prefix (the
+    Lexi model's `**Assistant**: {"t": "bot_input", ...}` shape) is
+    stripped when present; a `**` that does NOT close with `:` (bold
+    prose) diverges immediately.
+    """
+    p = probe.lstrip()
+    if p.startswith("**"):
+        close = p.find("**", 2)
+        if close == -1:
+            return ("prefix", "")
+        after = p[close + 2 :]
+        if not after.startswith(":"):
+            return ("no", "")  # bold/emphasis prose, not a role prefix
+        rest = after[1:].lstrip()
+        if not rest:
+            return ("prefix", "")  # wait for the envelope head
+        probe = rest
+    if not probe.startswith("{"):
+        return ("no", "")
+    state = _envelope_head_state(probe)
+    if state == "no":
+        return ("no", "")
+    if state == "prefix":
+        return ("prefix", "")
+    return ("match", probe[_envelope_head_end(probe) :])
+
+
+def _envelope_head_end(probe: str) -> int:
+    """Index just past the envelope head within probe (match state)."""
+    m = _ENVELOPE_RE.match(probe)
+    return m.end() if m else len(probe)
 
 
 async def unwrap_assistant_envelope(
     stream: AsyncIterator[str],
 ) -> AsyncIterator[str]:
-    """Pass through LLM deltas, unwrapping a leading assistant envelope.
+    """Pass through LLM deltas, unwrapping a leading JSON envelope.
 
     Normal prose is passed through with ZERO added latency (the first
     delta is emitted as soon as it is proven not to be an envelope
-    prefix). Only when the stream begins with the envelope prefix do we
-    strip it; the inner text then streams immediately, sentence by
-    sentence, and a trailing `"}` (possibly split across deltas) is
-    dropped at the end. A stream that starts with `{` but diverges from
-    the envelope prefix is passed through untouched.
+    prefix). Only when the stream begins with an optional markdown role
+    prefix (`**Assistant**: ` etc.) followed by a JSON envelope of the
+    form `{"t": <anything>, "text": "` do we strip it; the inner text
+    then streams immediately, sentence by sentence, and a trailing `"}`
+    (possibly split across deltas) is dropped at the end. A stream that
+    starts with `{` but diverges from the envelope prefix is passed
+    through untouched.
     """
 
     pending = ""  # pre-envelope accumulation (prefix matching only)
@@ -55,25 +130,20 @@ async def unwrap_assistant_envelope(
     async for delta in stream:
         if not inside:
             pending += delta
-            probe = pending.lstrip()
-            if probe:
-                n = min(len(probe), len(_ENVELOPE_PREFIX))
-                if probe[:n] != _ENVELOPE_PREFIX[:n]:
-                    # Diverged from the envelope prefix — pass through raw.
-                    yield pending
-                    pending = ""
-                    async for d in stream:
-                        yield d
-                    return
-                if probe.startswith(_ENVELOPE_PREFIX):
-                    inside = True
-                    rest = probe[len(_ENVELOPE_PREFIX) :]
-                    pending = ""
-                    # Reuse the inside path for the rest (the closing '"}'
-                    # may already be in it).
-                    delta = rest
-                else:
-                    continue
+            state, rest = _prefix_state(pending)
+            if state == "no":
+                # Diverged from the envelope prefix — pass through raw.
+                yield pending
+                pending = ""
+                async for d in stream:
+                    yield d
+                return
+            if state == "prefix":
+                continue
+            # Full envelope head matched: enter inside with the rest.
+            inside = True
+            pending = ""
+            delta = rest
         else:
             delta = tail + delta
             tail = ""
