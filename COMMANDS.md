@@ -30,6 +30,8 @@ row says otherwise. Package managers: `cargo` (Rust workspace), `pip` inside
 | Local start (pod, mock stages) | `pod/.venv/bin/python -m vihs_pod.agent --mock-gpu` | `pod ready` log |
 | Chain fsck (event-log integrity) | `cargo run -p vihs-core --bin chain-fsck -- <events.jsonl>` | `CHAIN OK <n> events` |
 | Capacity load test | `sh scripts/loadtest-capacity.sh` (added in EP-007) | prints derived `sessions_per_gpu` |
+| Restore drill (SPEC-008 P6) | `sh scripts/p6-restore-drill.sh` (added in EP-010 M4) | `P6 OK` (snapshot → scratch-bucket restore → fleet chain-fsck) |
+| M2 deploy retry loop | `scripts/m2-retry-deploy.sh` (added in EP-010 M2; background helper) | `M2 DERIVE SUCCESS` or `pod exists (warm)` |
 
 Migration commands: not applicable (no relational DB). Schema evolution =
 event `v` field bump + reader tolerance; see SPEC-002.

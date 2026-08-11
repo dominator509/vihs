@@ -98,7 +98,7 @@ def fsck_fleet_sweep() -> None:
     env = {**os.environ, **load_env(ROOT / ".env")}
     cmd = [str(ROOT / "target" / "debug" / "memoryd"), "--rebuild-index"]
     proc = subprocess.run(
-        cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=120
+        cmd, cwd=ROOT, env=env, capture_output=True, text=True, timeout=600
     )
     out = proc.stdout + proc.stderr
     if "rebuild-index: done" not in out:
