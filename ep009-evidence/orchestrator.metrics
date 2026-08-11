@@ -3,26 +3,74 @@
 vihs_authz_denials_total 0
 # HELP vihs_cold_start_secs Pod cold-start duration from Booting to Ready (seconds).
 # TYPE vihs_cold_start_secs histogram
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="1"} 0
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="2"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="5"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="10"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="20"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="30"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="60"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="120"} 1
+vihs_cold_start_secs_bucket{pod_id="chaos-crash-3761153",le="+Inf"} 1
+vihs_cold_start_secs_sum{pod_id="chaos-crash-3761153"} 1.149159152
+vihs_cold_start_secs_count{pod_id="chaos-crash-3761153"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="1"} 0
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="2"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="5"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="10"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="20"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="30"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="60"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="120"} 1
+vihs_cold_start_secs_bucket{pod_id="e2e-e2e_resume-3772892",le="+Inf"} 1
+vihs_cold_start_secs_sum{pod_id="e2e-e2e_resume-3772892"} 1.212885631
+vihs_cold_start_secs_count{pod_id="e2e-e2e_resume-3772892"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="1"} 0
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="2"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="5"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="10"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="20"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="30"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="60"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="120"} 1
+vihs_cold_start_secs_bucket{pod_id="load-pod",le="+Inf"} 1
+vihs_cold_start_secs_sum{pod_id="load-pod"} 1.965806486
+vihs_cold_start_secs_count{pod_id="load-pod"} 1
 vihs_cold_start_secs_bucket{pod_id="staging-4090",le="1"} 0
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="2"} 0
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="5"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="10"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="20"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="30"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="60"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="120"} 3
-vihs_cold_start_secs_bucket{pod_id="staging-4090",le="+Inf"} 3
-vihs_cold_start_secs_sum{pod_id="staging-4090"} 6.783600733
-vihs_cold_start_secs_count{pod_id="staging-4090"} 3
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="2"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="5"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="10"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="20"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="30"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="60"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="120"} 1
+vihs_cold_start_secs_bucket{pod_id="staging-4090",le="+Inf"} 1
+vihs_cold_start_secs_sum{pod_id="staging-4090"} 1.319298842
+vihs_cold_start_secs_count{pod_id="staging-4090"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="1"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="2"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="5"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="10"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="20"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="30"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="60"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="120"} 1
+vihs_cold_start_secs_bucket{pod_id="torn-3762531",le="+Inf"} 1
+vihs_cold_start_secs_sum{pod_id="torn-3762531"} 0.936530043
+vihs_cold_start_secs_count{pod_id="torn-3762531"} 1
 # HELP vihs_pod_sessions Current session slot fill per pod (registry.pod.fill).
 # TYPE vihs_pod_sessions gauge
-vihs_pod_sessions{pod_id="3dd92108-4330-4543-9797-0e0e88ba3484"} 0
+vihs_pod_sessions{pod_id="bdf01c2f-53cb-4d94-a4be-d76d1957749e"} 0
+vihs_pod_sessions{pod_id="chaos-crash-3761153"} 1
+vihs_pod_sessions{pod_id="e2e-e2e_resume-3772892"} 1
+vihs_pod_sessions{pod_id="load-pod"} 0
 vihs_pod_sessions{pod_id="staging-4090"} 1
+vihs_pod_sessions{pod_id="torn-3762531"} 0
 # HELP vihs_resume_total Session resume outcomes (result=ok|denied|error).
 # TYPE vihs_resume_total counter
 vihs_resume_total{result="denied"} 0
-vihs_resume_total{result="error"} 0
-vihs_resume_total{result="ok"} 6
+vihs_resume_total{result="error"} 2
+vihs_resume_total{result="ok"} 11
 # HELP vihs_scale_events_total Autoscaler actions executed (dir=up|down|replace).
 # TYPE vihs_scale_events_total counter
 vihs_scale_events_total{dir="down"} 0

@@ -20,8 +20,6 @@ abort (SPEC-001 D3 — no orphaned GPU work).
 from __future__ import annotations
 
 import json
-from collections.abc import AsyncIterator
-from typing import Any
 
 # Defensive envelope unwrap (EP-010 M2): some hosted RP models wrap the
 # whole reply in a JSON envelope `{"t": "assistant_output", "text": "..."}`
@@ -35,6 +33,8 @@ from typing import Any
 # unwraps ANY `{"t": <anything>, "text": "..."}` envelope, so TTS never
 # sees JSON syntax regardless of which model produced it.
 import re
+from collections.abc import AsyncIterator
+from typing import Any
 
 _ENVELOPE_SUFFIX = '"}'
 # ANY envelope: {"t": <anything>, "text": " — matches both

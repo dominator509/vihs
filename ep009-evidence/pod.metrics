@@ -1,1 +1,84 @@
-# scrape error: <urlopen error [Errno -3] Temporary failure in name resolution>
+# HELP vihs_stage_first_chunk_ms First-chunk latency per pipeline stage (ms).
+# TYPE vihs_stage_first_chunk_ms histogram
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="50"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="100"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="200"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="400"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="800"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="1600"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="3200"} 2
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="6400"} 2
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="llm_ttft",le="+Inf"} 2
+vihs_stage_first_chunk_ms_sum{pod_id="staging-4090",model_ver="mock",stage="llm_ttft"} 4181.196228
+vihs_stage_first_chunk_ms_count{pod_id="staging-4090",model_ver="mock",stage="llm_ttft"} 2
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="50"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="100"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="200"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="400"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="800"} 1
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="1600"} 2
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="3200"} 3
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="6400"} 3
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa",le="+Inf"} 3
+vihs_stage_first_chunk_ms_sum{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa"} 4836.225299
+vihs_stage_first_chunk_ms_count{pod_id="staging-4090",model_ver="mock",stage="tts_ttfa"} 3
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="50"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="100"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="200"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="400"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="800"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="1600"} 0
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="3200"} 1
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="6400"} 2
+vihs_stage_first_chunk_ms_bucket{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff",le="+Inf"} 2
+vihs_stage_first_chunk_ms_sum{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff"} 8315.910148
+vihs_stage_first_chunk_ms_count{pod_id="staging-4090",model_ver="mock",stage="lipsync_ttff"} 2
+# HELP vihs_e2e_first_audio_ms Stop-speaking to first avatar audio (ms).
+# TYPE vihs_e2e_first_audio_ms histogram
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="250"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="500"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="1000"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="1500"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="2000"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="3000"} 0
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="4000"} 1
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="6000"} 2
+vihs_e2e_first_audio_ms_bucket{pod_id="staging-4090",model_ver="mock",le="+Inf"} 2
+vihs_e2e_first_audio_ms_sum{pod_id="staging-4090",model_ver="mock"} 8318.435624
+vihs_e2e_first_audio_ms_count{pod_id="staging-4090",model_ver="mock"} 2
+# HELP vihs_e2e_total_ms Full turn response duration (ms).
+# TYPE vihs_e2e_total_ms histogram
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="250"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="500"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="1000"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="1500"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="2000"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="3000"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="4000"} 0
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="6000"} 1
+vihs_e2e_total_ms_bucket{pod_id="staging-4090",model_ver="mock",le="+Inf"} 1
+vihs_e2e_total_ms_sum{pod_id="staging-4090",model_ver="mock"} 5963.282645
+vihs_e2e_total_ms_count{pod_id="staging-4090",model_ver="mock"} 1
+# HELP vihs_bargein_total Barge-in events (user interrupted playback).
+# TYPE vihs_bargein_total counter
+vihs_bargein_total{pod_id="staging-4090",model_ver="mock"} 0
+# HELP vihs_endpoint_premature_total User spoke <300 ms after endpoint.
+# TYPE vihs_endpoint_premature_total counter
+vihs_endpoint_premature_total{pod_id="staging-4090",model_ver="mock"} 0
+# HELP vihs_abort_flush_ms Barge-in abort flush duration (ms; budget ≤100).
+# TYPE vihs_abort_flush_ms histogram
+vihs_abort_flush_ms_bucket{pod_id="staging-4090",model_ver="mock",le="+Inf"} 0
+vihs_abort_flush_ms_sum{pod_id="staging-4090",model_ver="mock"} 0
+vihs_abort_flush_ms_count{pod_id="staging-4090",model_ver="mock"} 0
+# HELP vihs_append_buffer_depth Pending appends in the pod buffer.
+# TYPE vihs_append_buffer_depth gauge
+vihs_append_buffer_depth{pod_id="staging-4090",model_ver="mock"} 0
+# HELP vihs_prefix_cache_hit_ratio LLM prefix-cache hit ratio (INV-4).
+# TYPE vihs_prefix_cache_hit_ratio gauge
+vihs_prefix_cache_hit_ratio{pod_id="staging-4090",model_ver="mock"} 0.95
+# HELP vihs_epoch_boundary_total Memory epoch boundaries observed by the pod.
+# TYPE vihs_epoch_boundary_total counter
+vihs_epoch_boundary_total{pod_id="staging-4090",model_ver="mock"} 0
+# HELP vihs_gpu_util GPU utilization (0 in mock mode).
+# TYPE vihs_gpu_util gauge
+vihs_gpu_util{pod_id="staging-4090",model_ver="mock"} 0

@@ -8,10 +8,10 @@ vihs_append_latency_ms_bucket{le="50"} 0
 vihs_append_latency_ms_bucket{le="100"} 0
 vihs_append_latency_ms_bucket{le="250"} 0
 vihs_append_latency_ms_bucket{le="500"} 0
-vihs_append_latency_ms_bucket{le="1000"} 3
-vihs_append_latency_ms_bucket{le="+Inf"} 37
-vihs_append_latency_ms_sum 46797.979338
-vihs_append_latency_ms_count 37
+vihs_append_latency_ms_bucket{le="1000"} 5
+vihs_append_latency_ms_bucket{le="+Inf"} 30
+vihs_append_latency_ms_sum 37298.089370999995
+vihs_append_latency_ms_count 30
 # HELP vihs_authz_denials_total Authorization denials.
 # TYPE vihs_authz_denials_total counter
 vihs_authz_denials_total 0

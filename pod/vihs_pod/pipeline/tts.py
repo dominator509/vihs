@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
@@ -222,17 +223,55 @@ class PiperTTS:
         before the first real session (EP-010 M2: in-process synthesis of
         a short clause is ~88ms; the subprocess fallback pays ~3.5s of
         ONNX init on every spawn). Best-effort: failure falls back to the
-        CLI path at stream time."""
+        CLI path at stream time.
+
+        The ONNX session is created with a BOUNDED intra-op thread pool
+        (VIHS_TTS_THREADS, default 2): onnxruntime's default of 0 means
+        "all cores", which thrashes against llama-server on the same
+        vCPUs — measured: tts_ttfa 1.4–1.7s on the pod vs ~300ms local
+        with the same voice. A short clause parallelizes poorly past 2
+        threads, so bounding costs ~nothing while leaving llama-server
+        headroom.
+        """
         import logging
 
         log = logging.getLogger("vihs_pod.pipeline.tts")
         if self._voice is not None:
             return
         try:
+            import json
+
+            import onnxruntime  # type: ignore[import-untyped]
+            from piper.config import PiperConfig
+            from piper.phonemize_espeak import ESPEAK_DATA_DIR
             from piper.voice import PiperVoice  # noqa: PLC0415
 
-            self._voice = await asyncio.to_thread(PiperVoice.load, self.voice, None, self.cuda)
-            log.info("tts warmup OK voice=%s cuda=%s", self.voice, self.cuda)
+            threads = int(os.environ.get("VIHS_TTS_THREADS", "2"))
+            providers: list[tuple[str, dict[str, str]]] = (
+                [("CUDAExecutionProvider", {"cudnn_conv_algo_search": "HEURISTIC"})]
+                if self.cuda
+                else [("CPUExecutionProvider", {})]
+            )
+            opts = onnxruntime.SessionOptions()
+            if threads > 0:
+                opts.intra_op_num_threads = threads
+            with open(f"{self.voice}.json", encoding="utf-8") as f:
+                config = PiperConfig.from_dict(json.load(f))
+            session = onnxruntime.InferenceSession(
+                self.voice, sess_options=opts, providers=providers
+            )
+            self._voice = PiperVoice(
+                session=session,
+                config=config,
+                espeak_data_dir=ESPEAK_DATA_DIR,
+                download_dir=None,  # type: ignore[arg-type]  # noqa: PLC0415
+            )
+            log.info(
+                "tts warmup OK voice=%s cuda=%s threads=%d",
+                self.voice,
+                self.cuda,
+                threads,
+            )
         except Exception as exc:  # noqa: BLE001 — fall back to CLI path
             self._voice = None
             log.warning("tts warmup FAILED voice=%s: %s", self.voice, exc)

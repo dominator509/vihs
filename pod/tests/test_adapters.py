@@ -244,10 +244,10 @@ async def test_unwrap_assistant_envelope_bot_input_role_prefix() -> None:
     async def gen():
         for piece in [
             "**Assist",
-            "ant**: {\"t\": \"bot_",
-            "input\", \"text\": \"Hel",
+            'ant**: {"t": "bot_',
+            'input", "text": "Hel',
             "lo! How are you",
-            ' doing?\"}',
+            ' doing?"}',
         ]:
             yield piece
 
@@ -274,9 +274,9 @@ async def test_unwrap_assistant_envelope_plain_role_prefix() -> None:
 
     async def gen():
         for piece in [
-            "user: {\"t\": \"assist",
-            "ant_output\", \"text\": \"Hel",
-            "lo there!\"}",
+            'user: {"t": "assist',
+            'ant_output", "text": "Hel',
+            'lo there!"}',
         ]:
             yield piece
 
