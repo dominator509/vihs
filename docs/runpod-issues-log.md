@@ -64,7 +64,7 @@ runs fluidly, keep it warm and reuse it for all testing/evidence.
   old operator rule (no longer the rule)
 - **Billing concern**: NO — this was productive, expected usage.
 
-### I-2026-08-11-05 — IN PROGRESS: e83mgcakbwb877 (new attempt)
+### I-2026-08-11-05 — CLOSED: e83mgcakbwb877 (killed per 30-min rule, see below)
 - **Pod**: e83mgcakbwb877 created ~19:41:26 local by retry loop
 - **Status**: booting; will KEEP WARM per operator rule and reuse for M2
   ramp + M3/M4 evidence
@@ -103,3 +103,12 @@ instance time.
 - Include pod id, timestamps (local), symptom, evidence file, action,
   and YES/NO/UNCERTAIN for billing.
 - After the pod is terminated, update the Dispute summary table.
+### I-2026-08-11-05 — CLOSED: e83mgcakbwb877 (killed per 30-min rule)
+- **Pod**: e83mgcakbwb877 · created 19:41:26 · killed ~20:08 local
+- **Symptom**: returned NOTHING for ~27 min — zero console logs, no agent
+  registration, 8093 health 502. One crash-restart at 673s; cycle 2 ran to
+  800s+ still silent. Same broken-node signature as I-02/I-03.
+- **Evidence**: /tmp/pod_monitor.log (uptime deltas), 502 on
+  https://e83mgcakbwb877-8093.proxy.runpod.net/health, empty logs endpoint
+- **Action**: terminated per operator 30-min rule (docs/runpod-issues-log.md)
+- **Billing concern**: **YES — dispute.** Pod billed ~27 min, never usable.
