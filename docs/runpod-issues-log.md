@@ -144,7 +144,15 @@ Operator rules (2026-08-11, kill window tightened to 7 min):
 | I-06 | 4lby9klwrazkav | ~2h11m (20:07–22:1x, mostly under old 30-min watch) | YES — never registered agent | OPEN |
 | I-07 | gqwksjzmljp3ds | ~10 min (20:38–20:48) | YES — never registered agent | OPEN |
 
-Total disputed to date: ~4h10m of billed-but-unusable instance time.
+**Plus 13 AUTO-killed pods (20:48–22:54, ~7 min each, never Ready):**
+2er50ruc3lvgwb, 14bngamekc9ypj, 0yex0vd8eqbj8e, 0oauaxclyf0bss,
+d8fxsgvyn40tur, 55yhg271r7mooi, utaxwo3ydm3ban, r94blg8ng6ceat,
+op92y3ud0xtgfl, 4rnnus91ojg7rg, t7v1oa87uxjaj5, bwrs77wzd69sf1,
+1sxfyrnnr9dyw6, fglyqvyhsxtudx, hpcfs3fzpqvses — ~101 min combined.
+See the I-2026-08-11-AUTO entries below for full detail.
+
+Total disputed to date: **20 pods, ~351 min (~5h51m)** of billed-but-unusable
+instance time. Full case in docs/runpod-dispute-email.md.
 
 Support contact notes: account doministic@gmail.com; instance IDs above;
 symptom = container crash-loop / no agent registration / no port 8093
@@ -267,3 +275,101 @@ Relevant files to review:
 - Include pod id, timestamps (local), symptom, evidence file/links, action,
   and YES/NO/UNCERTAIN for billing.
 - After the pod is terminated, update the Dispute summary table.
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 2er50ruc3lvgwb
+- **Created**: 20:55:10 local · **Killed**: 20:55:10 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 14bngamekc9ypj
+- **Created**: 21:03:47 local · **Killed**: 21:03:47 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 0yex0vd8eqbj8e
+- **Created**: 21:12:21 local · **Killed**: 21:12:21 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 0oauaxclyf0bss
+- **Created**: 21:20:57 local · **Killed**: 21:20:57 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: d8fxsgvyn40tur
+- **Created**: 21:31:02 local · **Killed**: 21:31:02 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 55yhg271r7mooi
+- **Created**: 21:39:38 local · **Killed**: 21:39:38 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: utaxwo3ydm3ban
+- **Created**: 21:48:16 local · **Killed**: 21:48:16 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: r94blg8ng6ceat
+- **Created**: 22:02:55 local · **Killed**: 22:02:55 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: op92y3ud0xtgfl
+- **Created**: 22:11:29 local · **Killed**: 22:11:29 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 4rnnus91ojg7rg
+- **Created**: 22:20:06 local · **Killed**: 22:20:06 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: t7v1oa87uxjaj5
+- **Created**: 22:28:42 local · **Killed**: 22:28:42 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: bwrs77wzd69sf1
+- **Created**: 22:37:18 local · **Killed**: 22:37:18 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: 1sxfyrnnr9dyw6
+- **Created**: 22:45:54 local · **Killed**: 22:45:54 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
+### I-2026-08-11-AUTO — pod never Ready within 420s
+- **Pod**: fglyqvyhsxtudx
+- **Created**: 22:54:29 local · **Killed**: 22:54:29 local
+- **Symptom**: no agent registration / no readiness within 420s (operator 7-min rule)
+- **Action**: automatic kill per operator rule; retry loop continues
+- **Billing concern**: **YES — dispute** (pod billed while never usable)
+
