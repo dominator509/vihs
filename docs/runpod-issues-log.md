@@ -68,8 +68,12 @@ runs fluidly, keep it warm and reuse it for all testing/evidence.
 - **Pod**: e83mgcakbwb877 created ~19:41:26 local by retry loop
 - **Status**: booting; will KEEP WARM per operator rule and reuse for M2
   ramp + M3/M4 evidence
-- **Billing concern**: watch — if it crash-loops like I-02/I-03, log it
-  as another dispute entry.
+- **Update ~20:15**: pod crash-restarted once at 673s uptime (runtime
+  uptime reset 673 → 19); now on cycle 2 (288s+ and climbing). Logs
+  endpoint returns ZERO lines (same as I-03). Being kept warm + monitored
+  per operator rule (30s uptime-delta monitor, /tmp/pod_monitor.log).
+- **Billing concern**: watch — if it stays in crash-loop without the
+  agent ever registering, log it as another dispute entry.
 
 ---
 
