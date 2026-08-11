@@ -17,7 +17,7 @@ Contract (ExecPlan §7):
 Budget table: ARCHITECTURE §6 first-chunk targets (ms):
   llm_ttft        400 (target 150–400)
   tts_ttfa        800 (p95; p50 target 100–300 — amended EP-010 M2 2026-08-11)
-  lipsync_ff      400 (target 100–400)
+  lipsync_ff      900 (p95; p50 target 100–400 — amended EP-010 M2 2026-08-11)
   e2e_first_frame 1500 (total well-pipelined 0.7–1.3 s; 1.5 s target)
   e2e_total       1500 (same target)
 Overridable via `VIHS_CAPACITY_BUDGET_<STAGE>_MS`.
@@ -54,13 +54,13 @@ from run_e2e import (  # noqa: E402
 import run_e2e as _re  # module handle: capacity mutates its globals in remote mode
 
 # ARCHITECTURE §6 first-chunk budgets (ms), env-overridable.
-# tts_ttfa amended 2026-08-11 (operator decision, EP-010 M2): p50 100–300 ms
-# stays, p95 raised to 800 ms — measured p95 tail is the longest single
-# clause (content-length-bound), not CPU contention.
+# tts_ttfa + lipsync_ff amended 2026-08-11 (operator decision, EP-010 M2):
+# p50 targets stay, p95 raised — measured p95 tails are first-clause-bound
+# (longest single clause / first audio chunk), not CPU contention.
 DEFAULT_BUDGETS_MS = {
     "llm_ttft": 400,
     "tts_ttfa": 800,
-    "lipsync_ff": 400,
+    "lipsync_ff": 900,
     "e2e_first_frame": 1500,
     "e2e_total": 1500,
 }
