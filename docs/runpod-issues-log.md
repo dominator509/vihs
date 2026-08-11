@@ -112,3 +112,69 @@ instance time.
   https://e83mgcakbwb877-8093.proxy.runpod.net/health, empty logs endpoint
 - **Action**: terminated per operator 30-min rule (docs/runpod-issues-log.md)
 - **Billing concern**: **YES — dispute.** Pod billed ~27 min, never usable.
+
+---
+
+## Research: is this common / are we doing something wrong? (2026-08-11)
+
+### Community reports (same symptom as ours)
+- **AnswerOverflow/Discord (Dec 2024)**: "Throttled download speed from
+  container registry while still being billed" — user's image pull took
+  ~45 min, billed while waiting. Asked if it's intentional; "conflict of
+  interests" concern. URL: answeroverflow.com/m/1319757071448543346
+- **AnswerOverflow/Discord (Jul 2025)**: "Registry fetching extremely slow
+  for the past 2 days" — a 130GB image that used to boot in ~20 min was
+  taking 60+ min; slowdown coincided with a RunPod change.
+  URL: answeroverflow.com/m/1400148062248239104
+- **Reddit r/RunPod (Mar 2026)**: "Is anyone having to stop and start pods
+  over and over to get them running correctly?" — frequent hung/reset pods.
+  URL: reddit.com/r/RunPod/comments/1s2be4u
+- **RunPod's own worker-vllm repo, Issue #111 (Sep 2024)**: "Very slow cold
+  starts even with flashboot" — RunPod staff acknowledged the flow change
+  and pointed at model caching / baking models into the image.
+  URL: github.com/runpod-workers/worker-vllm/issues/111
+
+### Official RunPod documentation
+- **Billing is per-second and starts at pod creation — including during
+  image pull / initialization.** (docs.runpod.io/accounts-billing/billing:
+  "All compute and storage charges are billed per second"; credits deducted
+  in real-time based on active Pods.) There is no stated grace period for
+  initialization time.
+- **Optimization guide** (docs.runpod.io/serverless/development/optimization):
+  - Cold start = model load into GPU; "Initialization time: Downloading
+    Docker image."
+  - "If cold start exceeds 7 minutes, the worker is marked unhealthy" —
+    ours hang 30+ min, far past this.
+  - Recommended fixes for cold starts: cached models, **bake models into
+    the image** (loads from local NVMe instead of downloading at runtime),
+    active workers > 0, multiple GPU types for availability.
+  - Network volumes: "restrict to specific data centers" (matches our
+    US-IL-1 pin).
+
+### Our own configuration assessment (what we could be doing wrong)
+- We use `ttl.sh` (ephemeral anonymous registry) for the pod image. ttl.sh
+  pulls from cold RunPod nodes are documented-slow (~6s/MB observed; our
+  earlier CUDA-fat image took >45 min from GHCR/ttl.sh, which is WHY we
+  built the slim launcher). On broken nodes the pull stalls entirely.
+- Our slim-boot ALSO downloads 57 wheels (~160MB) + optionally the 4.9GB
+  GGUF at container start from OUR operator box — every cold boot repeats
+  this. Official guidance would be to bake deps into the image so boot is
+  just "start the process".
+- We keep the network volume in US-IL-1; RunPod's volume-DC pin means we
+  cannot spread across regions when US-IL-1 4090s are scarce (400s) or
+  serving bad nodes.
+
+### Throttling vs node quality — honest read
+- No doc states intentional throttling of ttl.sh or operator-box pulls.
+  The community threads describe slowdowns correlated with RunPod-side
+  changes and per-node variance ("varying runtime performance box-to-box"
+  — pierce.dev/notes/speeding-up-runpod).
+- The crash-loop signature we see (container restarts at ~11 min, zero
+  logs, no agent) is consistent with bad-node/init-timeout behavior, NOT
+  anything we can fix from the image side. Our healthy pod booted in
+  ~110s with the SAME image — so image/config are not the differentiator;
+  the node is.
+- Action items to reduce exposure (not blocking EP-010): bake wheels into
+  the slim image (skip runtime pip), consider Docker Hub mirror creds for
+  faster pulls, and (already in place) kill-and-retry at 30 min for
+  unresponsive pods.
