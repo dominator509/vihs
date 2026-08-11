@@ -153,7 +153,7 @@ each stage's FIRST-CHUNK latency. The pipelining is the product.
 | STT final flush | 50–150 ms | streaming ASR, partials pre-computed |
 | LLM TTFT | 150–400 ms | prefix cache (persona+memory), model size |
 | First completable clause | +100–250 ms | clause-boundary chunking |
-| TTS TTFA | 100–300 ms | Piper/XTTS/Cartesia streaming |
+| TTS TTFA | 100–300 ms p50 / ≤800 ms p95 | Piper streaming. EP-010 M2 measured (Lexi local + bounded ONNX threads): p50 68–152 ms; p95 tail to ~600 ms is the longest single clause (content-length-bound), not contention — budget amended 2026-08-11 per operator decision. |
 | Lip-sync first frame | 100–400 ms | usually THE bottleneck; lighter model |
 | Network + jitter buffer | 50–150 ms | TURN only when needed |
 Total well-pipelined: ~0.7–1.3 s, inside the 1.5 s target.
