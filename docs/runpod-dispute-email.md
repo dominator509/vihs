@@ -1,7 +1,7 @@
 # RunPod Billing Dispute — Draft Email
 
-To: billing@runpod.io / support@runpod.io (via https://www.runpod.io/contact)
-From: doministic@gmail.com
+To: help@runpod.io (official billing-dispute contact per RunPod ToS)
+From: dswmarketingllc@agentmail.to
 Subject: Billing dispute — 20 unusable pods billed while never becoming
 operational (Aug 11, 2026, US-IL-1 RTX 4090) — refund requested
 
@@ -101,7 +101,8 @@ minutes). I am attaching logs and evidence below.
 - https://www.reddit.com/r/RunPod/comments/1s2be4u/ — "Is anyone having
   to stop and start pods over and over to get them running correctly?"
 - https://github.com/runpod-workers/worker-vllm/issues/111 — "Very slow
-  cold starts even with flashboot" (RunPod staff acknowledged)
+  cold starts even with flashboot" (open issue in RunPod's own repo,
+  Sep 2024, with replies from a RunPod repo contributor)
 - https://pierce.dev/notes/speeding-up-runpod — "varying runtime
   performance box-to-box"
 
