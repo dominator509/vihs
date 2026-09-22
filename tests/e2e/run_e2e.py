@@ -400,6 +400,15 @@ class ClientPeer:
         await self.pc.close()
 
 
+def _pod_log_tail(log_path: Path, limit: int = 4000) -> str:
+    """Tail of the pod agent's log for failure messages — without this, a
+    pod that dies at startup fails the gate with no evidence of why."""
+    try:
+        return log_path.read_text(errors="replace")[-limit:]
+    except OSError:
+        return "<no pod log file>"
+
+
 def websockets_connect(url: str, auth_frame: bool = False):
     import websockets
 
@@ -426,8 +435,11 @@ def e2e_connect() -> None:
         if not asyncio.run(
             wait_for_text(log_path, "assign channel live", timeout=15.0)
         ):
+            alive = pod_proc.poll() is None
             raise RuntimeError(
-                "pod did not connect its assign WS (register/ack failed)"
+                "pod did not connect its assign WS (register/ack failed); "
+                f"pod alive at timeout: {alive}; "
+                f"pod log tail:\n{_pod_log_tail(log_path)}"
             )
 
         status, body = api("/v1/sessions", method="POST", body={"persona_id": "e2e"})
@@ -439,7 +451,10 @@ def e2e_connect() -> None:
         _connect_session(session_id)
 
         if not asyncio.run(wait_for_text(log_path, "conversation ready", timeout=10.0)):
-            raise RuntimeError("pod did not start the assignment conversation")
+            raise RuntimeError(
+                "pod did not start the assignment conversation; "
+                f"pod log tail:\n{_pod_log_tail(log_path)}"
+            )
 
         status = http_get(f"http://{POD_ADDR}/health")
         if status != 200:
