@@ -29,7 +29,9 @@ if [ -f Cargo.toml ]; then
     fi
     export VIHS_REDIS_URL VIHS_S3_ENDPOINT VIHS_S3_BUCKET VIHS_S3_ACCESS_KEY \
       VIHS_S3_SECRET_KEY VIHS_MEMORYD_ADDR VIHS_TOKEN_PEPPER
-    cargo build -p memoryd
+    # Build the service binaries: memoryd runs below for the contract suites;
+    # the e2e gate (scripts/test-e2e.sh) starts target/debug/orchestrator itself.
+    cargo build -p memoryd -p orchestrator
     mkdir -p .test-artifacts
     ./target/debug/memoryd > .test-artifacts/memoryd-ci.log 2>&1 &
     MEMD_PID=$!
