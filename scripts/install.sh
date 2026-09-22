@@ -21,12 +21,11 @@ fi
 if [ ! -f .env ] && [ -f .env.example ]; then
   cp .env.example .env
   fill_secret() {
+    # Replace the key's placeholder line (commented or bare, whatever the
+    # placeholder value: empty, ***, <...>). The .env was just copied from
+    # .env.example so each key is present exactly once.
     val="$("$PY" -c 'import secrets; print(secrets.token_urlsafe(32))')"
-    if grep -q "^# *$1=" .env; then
-      sed -i "s|^# *$1=.*|$1=$val|" .env
-    elif grep -q "^$1=$" .env || grep -q "^$1=<" .env; then
-      sed -i "s|^$1=.*|$1=$val|" .env
-    fi
+    sed -i "s|^#* *$1=.*|$1=$val|" .env
   }
   fill_secret VIHS_TOKEN_PEPPER
   fill_secret VIHS_ADMIN_TOKEN
