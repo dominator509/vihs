@@ -60,20 +60,16 @@ def memoryd_pid() -> int:
         text=True,
     ).stdout.strip()
     # pgrep -af returns lines "PID CMD". The actual memoryd binary is the
-    # line whose COMMAND starts with the binary path (not a bash wrapper).
+    # line whose argv[0] basename is exactly "memoryd" — however it was
+    # launched (absolute/relative path, any checkout dir). This excludes the
+    # python chaos script itself (argv[0] is the python interpreter).
     for line in out.splitlines():
         parts = line.split(None, 1)
         if len(parts) != 2:
             continue
         pid, cmd = parts
-        if (
-            cmd.startswith("/root/vihs/target/debug/memoryd")
-            or cmd.startswith("/root/vihs/target/release/memoryd")
-            or cmd.startswith("./target/debug/memoryd")
-            or cmd.startswith("./target/release/memoryd")
-            or cmd.startswith("target/debug/memoryd")
-            or cmd.startswith("target/release/memoryd")
-        ):
+        exe = cmd.split(None, 1)[0]
+        if os.path.basename(exe) == "memoryd":
             return int(pid)
     raise RuntimeError("memoryd binary process not found (pgrep output:\n" + out + ")")
 

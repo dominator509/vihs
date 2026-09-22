@@ -8,7 +8,48 @@ if [ -f deploy/docker/compose.dev.yml ]; then
 fi
 if [ -f Cargo.toml ]; then
   if find crates -maxdepth 2 -type d -name tests | grep -q .; then
+    # The mcpd/orchestrator contract suites call a LIVE memoryd over HTTP
+    # (SPEC-003; the tests document "Requires dev services (memoryd, Redis,
+    # MinIO)"). Start it here so CI and fresh dev boxes don't depend on a
+    # manual `cargo run -p memoryd` from COMMANDS.md.
+    : "${VIHS_REDIS_URL:=redis://127.0.0.1:6379}"
+    : "${VIHS_S3_ENDPOINT:=http://127.0.0.1:9000}"
+    : "${VIHS_S3_BUCKET:=vihs-sessions}"
+    : "${VIHS_S3_ACCESS_KEY:=minioadmin}"
+    : "${VIHS_S3_SECRET_KEY:=minioadmin}"
+    : "${VIHS_MEMORYD_ADDR:=127.0.0.1:8091}"
+    if [ -z "${VIHS_TOKEN_PEPPER:-}" ]; then
+      if [ -f .env ]; then
+        VIHS_TOKEN_PEPPER="$(sed -n 's/^VIHS_TOKEN_PEPPER=//p' .env | head -n 1 | tr -d '\r')"
+      fi
+      # Test-only pepper (>=16 chars per memoryd validation). Exported below
+      # so the cargo-test processes mint tokens with the same pepper the
+      # live memoryd verifies (the tests' ensure_shared_pepper prefers env).
+      : "${VIHS_TOKEN_PEPPER:=ci-integration-test-pepper-0123456789abcdef}"
+    fi
+    export VIHS_REDIS_URL VIHS_S3_ENDPOINT VIHS_S3_BUCKET VIHS_S3_ACCESS_KEY \
+      VIHS_S3_SECRET_KEY VIHS_MEMORYD_ADDR VIHS_TOKEN_PEPPER
+    # Build the service binaries: memoryd runs below for the contract suites;
+    # the e2e gate (scripts/test-e2e.sh) starts target/debug/orchestrator itself.
+    cargo build -p memoryd -p orchestrator
+    mkdir -p .test-artifacts
+    ./target/debug/memoryd > .test-artifacts/memoryd-ci.log 2>&1 &
+    MEMD_PID=$!
+    trap 'kill $MEMD_PID 2>/dev/null || true' EXIT INT TERM
+    i=0; until curl -sf "http://${VIHS_MEMORYD_ADDR}/readyz" >/dev/null 2>&1; do
+      i=$((i+1))
+      if [ "$i" -gt 60 ]; then
+        echo "INTEGRATION FAIL: memoryd not ready at $VIHS_MEMORYD_ADDR" >&2
+        echo "--- .test-artifacts/memoryd-ci.log ---" >&2
+        tail -n 30 .test-artifacts/memoryd-ci.log >&2 || true
+        exit 1
+      fi
+      sleep 1
+    done
     cargo test --workspace --test '*'
+    # NOTE: memoryd stays up past this point — the python integration-marked
+    # tests below (pod/tests/test_memory_client.py) also hit the live memoryd
+    # (SPEC-003). The EXIT trap shuts it down when this script ends.
   else
     echo "integration: SKIP rust (no integration tests yet — EP-003)"
   fi

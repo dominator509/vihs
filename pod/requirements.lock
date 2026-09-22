@@ -1,3 +1,6 @@
+# Pinned runtime/test deps for pod/.venv (install: pod/.venv/bin/pip install -r pod/requirements.lock).
+# NOTE: CI pins Python 3.11 (.github/workflows/ci.yml + scripts/install.sh), so every
+# pin must ship a cp311 wheel / allow requires-python >=3.11 (numpy 2.5.x needs >=3.12).
 pytest==9.0.3
 pytest-asyncio==1.4.0
 mypy==1.15.0
@@ -5,7 +8,7 @@ ruff==0.9.10
 aiortc==1.15.0
 av==17.1.0
 websockets==17.0.1
-numpy==2.5.1
+numpy==2.3.3
 httpx==0.28.1
 faster-whisper==1.2.1
 piper-tts==1.6.0
