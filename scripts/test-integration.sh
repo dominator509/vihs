@@ -47,8 +47,9 @@ if [ -f Cargo.toml ]; then
       sleep 1
     done
     cargo test --workspace --test '*'
-    kill $MEMD_PID 2>/dev/null || true
-    trap - EXIT INT TERM
+    # NOTE: memoryd stays up past this point — the python integration-marked
+    # tests below (pod/tests/test_memory_client.py) also hit the live memoryd
+    # (SPEC-003). The EXIT trap shuts it down when this script ends.
   else
     echo "integration: SKIP rust (no integration tests yet — EP-003)"
   fi
