@@ -152,6 +152,7 @@ def bootstrap_tokens() -> None:
             "(32-byte base64url) in .env"
         )
     POD_TOKEN = pod_tok
+    POD_TOKEN = pod_tok
     # Mint a user token for the E2E owner. The admin listener shares the
     # public app in dev (main.rs merges admin_routes), so ORCH_ADDR works.
     data = json.dumps({"owner_id": "e2e-owner", "scope": "user"}).encode()
